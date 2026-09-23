@@ -25,12 +25,14 @@ final class PlaylistStore {
         final String uri;
         final String type;
         final String name;
+        final String grantUri;
 
-        Entry(String id, String uri, String type, String name) {
+        Entry(String id, String uri, String type, String name, String grantUri) {
             this.id = id;
             this.uri = uri;
             this.type = type;
             this.name = name;
+            this.grantUri = grantUri;
         }
     }
 
@@ -53,7 +55,8 @@ final class PlaylistStore {
                 String uri = item.optString("uri");
                 String type = item.optString("type");
                 if (id.isEmpty() || uri.isEmpty() || !("image".equals(type) || "video".equals(type))) continue;
-                result.add(new Entry(id, uri, type, item.optString("name", type)));
+                result.add(new Entry(id, uri, type, item.optString("name", type),
+                        item.optString("grant", "")));
             }
         } catch (Exception ignored) { }
         return result;
@@ -73,7 +76,7 @@ final class PlaylistStore {
                 Files.copy(input, temporary.toPath(), StandardCopyOption.REPLACE_EXISTING);
             }
             Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            Entry entry = new Entry(id, Uri.fromFile(target).toString(), "image", name);
+            Entry entry = new Entry(id, Uri.fromFile(target).toString(), "image", name, "");
             items.add(entry);
             if (!save(items)) throw new IllegalStateException("could not save playlist");
             return entry;
@@ -85,9 +88,14 @@ final class PlaylistStore {
     }
 
     Entry addVideo(Uri source, String name) {
+        return addVideo(source, name, null);
+    }
+
+    Entry addVideo(Uri source, String name, Uri treeGrant) {
         List<Entry> items = entries();
         if (items.size() >= MAX_ITEMS) throw new IllegalStateException("playlist full");
-        Entry entry = new Entry(UUID.randomUUID().toString(), source.toString(), "video", name);
+        Entry entry = new Entry(UUID.randomUUID().toString(), source.toString(), "video", name,
+                treeGrant == null ? "" : treeGrant.toString());
         items.add(entry);
         if (!save(items)) throw new IllegalStateException("could not save playlist");
         return entry;
@@ -103,6 +111,8 @@ final class PlaylistStore {
             if ("image".equals(entry.type)) {
                 File file = new File(new File(context.getFilesDir(), "playlist-images"), entry.id);
                 file.delete();
+            } else if ("video".equals(entry.type) && !entry.grantUri.isEmpty()) {
+                if (!usesTree(items, entry.grantUri)) releaseGrant(entry.grantUri);
             } else if ("video".equals(entry.type)
                     && !entry.uri.equals(prefs.getString(ClockSettings.BACKGROUND_URI, ""))) {
                 boolean stillUsed = false;
@@ -113,15 +123,28 @@ final class PlaylistStore {
                     }
                 }
                 if (!stillUsed) {
-                    try {
-                        context.getContentResolver().releasePersistableUriPermission(
-                                Uri.parse(entry.uri), Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                    } catch (SecurityException ignored) { }
+                    releaseGrant(entry.uri);
                 }
             }
             return true;
         }
         return false;
+    }
+
+    boolean usesTree(Uri treeUri) {
+        return usesTree(entries(), treeUri.toString());
+    }
+
+    private boolean usesTree(List<Entry> items, String grantUri) {
+        for (Entry item : items) if (grantUri.equals(item.grantUri)) return true;
+        return false;
+    }
+
+    private void releaseGrant(String uri) {
+        try {
+            context.getContentResolver().releasePersistableUriPermission(
+                    Uri.parse(uri), Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException ignored) { }
     }
 
     boolean move(String id, int delta) {
@@ -158,6 +181,7 @@ final class PlaylistStore {
                 item.put("uri", entry.uri);
                 item.put("type", entry.type);
                 item.put("name", entry.name);
+                item.put("grant", entry.grantUri);
                 array.put(item);
             }
         } catch (Exception error) {

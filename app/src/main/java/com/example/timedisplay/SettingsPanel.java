@@ -49,6 +49,7 @@ final class SettingsPanel {
     private static final int PICK_VIDEO = 3;
     private static final int PICK_PLAYLIST_IMAGES = 4;
     private static final int PICK_PLAYLIST_VIDEOS = 5;
+    private static final int PICK_PLAYLIST_FOLDER = 6;
     private static final String[] ZONES = {
             "SYSTEM", "UTC", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei",
             "Asia/Tokyo", "Asia/Seoul", "Asia/Singapore", "Asia/Manila",
@@ -99,6 +100,8 @@ final class SettingsPanel {
     private TextView playlistInfo;
     private Spinner backgroundSourceSpinner;
     private LinearLayout singleBackgroundControls;
+    private Button folderButton;
+    private boolean folderImporting;
 
     SettingsPanel(MainActivity host) {
         this.host = host;
@@ -321,6 +324,10 @@ final class SettingsPanel {
         otherHalf.setMargins(dp(3), dp(6), 0, 0);
         addButtons.addView(addVideos, otherHalf);
         content.addView(addButtons);
+        folderButton = createButton(t("添加文件夹", "Add folder"), v -> pickPlaylistFolder());
+        LinearLayout.LayoutParams folderParams = new LinearLayout.LayoutParams(-1, dp(50));
+        folderParams.topMargin = dp(6);
+        content.addView(folderButton, folderParams);
         section(t("播放设置", "Playback settings"));
         TextView playlistBrightnessInfo = label("", 16);
         content.addView(playlistBrightnessInfo);
@@ -798,20 +805,23 @@ final class SettingsPanel {
             name.setGravity(Gravity.CENTER_VERTICAL);
             row.addView(name, new LinearLayout.LayoutParams(0, dp(48), 1f));
             row.addView(playlistAction("↑", t("上移 ", "Move up ") + entry.name, () -> {
-                if (playlist.move(entry.id, -1)) playlistChanged();
+                if (!folderImporting && playlist.move(entry.id, -1)) playlistChanged();
             }), new LinearLayout.LayoutParams(dp(26), dp(48)));
             row.addView(playlistAction("↓", t("下移 ", "Move down ") + entry.name, () -> {
-                if (playlist.move(entry.id, 1)) playlistChanged();
+                if (!folderImporting && playlist.move(entry.id, 1)) playlistChanged();
             }), new LinearLayout.LayoutParams(dp(26), dp(48)));
             row.addView(playlistAction("×", t("删除 ", "Delete ") + entry.name, () -> {
+                if (folderImporting) return;
                 if (playlist.remove(entry.id)) playlistChanged();
                 else toast(t("删除失败", "Could not delete item"));
             }), new LinearLayout.LayoutParams(dp(30), dp(48)));
             row.setOnLongClickListener(v -> {
+                if (folderImporting) return false;
                 ClipData data = ClipData.newPlainText("playlist-entry", entry.id);
                 return v.startDragAndDrop(data, new View.DragShadowBuilder(v), null, 0);
             });
             row.setOnClickListener(v -> {
+                if (folderImporting) return;
                 prefs.edit().putString(ClockSettings.BACKGROUND_SOURCE, "playlist").apply();
                 updateSingleBackgroundControls();
                 if (backgroundSourceSpinner != null) backgroundSourceSpinner.setSelection(1);
@@ -820,6 +830,7 @@ final class SettingsPanel {
             row.setOnDragListener((v, event) -> {
                 if (event.getAction() == DragEvent.ACTION_DRAG_STARTED) return true;
                 if (event.getAction() == DragEvent.ACTION_DROP) {
+                    if (folderImporting) return true;
                     CharSequence dragged = event.getClipData().getItemAt(0).getText();
                     if (dragged != null && playlist.moveTo(dragged.toString(), position)) playlistChanged();
                     return true;
@@ -845,6 +856,7 @@ final class SettingsPanel {
     }
 
     private void pickPlaylistImages() {
+        if (folderImporting) return;
         Intent intent;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
@@ -870,12 +882,80 @@ final class SettingsPanel {
     }
 
     private void pickPlaylistVideos() {
+        if (folderImporting) return;
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("video/*");
         intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         host.startActivityForResult(intent, PICK_PLAYLIST_VIDEOS);
+    }
+
+    private void pickPlaylistFolder() {
+        if (folderImporting) return;
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        try {
+            host.startActivityForResult(intent, PICK_PLAYLIST_FOLDER);
+        } catch (ActivityNotFoundException unavailable) {
+            toast(t("此设备没有文件夹选择器", "No folder picker is available"));
+        }
+    }
+
+    private void importPlaylistFolder(Uri treeUri) {
+        if (folderImporting) return;
+        try {
+            host.getContentResolver().takePersistableUriPermission(treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException error) {
+            toast(t("无法长期读取所选文件夹", "Could not retain access to this folder"));
+            return;
+        }
+        folderImporting = true;
+        folderButton.setEnabled(false);
+        playlistInfo.setText(t("正在扫描并导入文件夹…", "Scanning and importing folder…"));
+        android.content.Context appContext = host.getApplicationContext();
+        new Thread(() -> {
+            PlaylistFolderImporter.Result result;
+            PlaylistStore importStore = new PlaylistStore(appContext);
+            try {
+                result = PlaylistFolderImporter.importTree(appContext, treeUri, importStore);
+                if (result.added > 0) ClockSettings.of(appContext).edit()
+                        .putString(ClockSettings.BACKGROUND_SOURCE, "playlist").commit();
+            } catch (Exception error) {
+                result = null;
+            }
+            if (!importStore.usesTree(treeUri)) {
+                try {
+                    appContext.getContentResolver().releasePersistableUriPermission(treeUri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                } catch (SecurityException ignored) { }
+            }
+            PlaylistFolderImporter.Result finished = result;
+            host.runOnUiThread(() -> {
+                if (host.isDestroyed()) return;
+                folderImporting = false;
+                folderButton.setEnabled(true);
+                refreshPlaylistList();
+                if (finished == null) {
+                    toast(t("文件夹读取失败", "Could not read the folder"));
+                    return;
+                }
+                if (finished.added > 0) {
+                    updateSingleBackgroundControls();
+                    if (backgroundSourceSpinner != null) backgroundSourceSpinner.setSelection(1);
+                    host.onSettingChanged(ClockSettings.PLAYLIST_ITEMS);
+                }
+                String message = t("已添加 ", "Added ") + finished.added
+                        + t(" 项", " items");
+                if (finished.skipped > 0) message += t("；跳过 ", "; skipped ") + finished.skipped;
+                if (finished.failed > 0) message += t("；失败 ", "; failed ") + finished.failed;
+                if (finished.limitReached) message += t("；已达列表上限", "; playlist limit reached");
+                if (finished.scanIncomplete) message += t("；文件夹过大，扫描未完成", "; scan incomplete");
+                Toast.makeText(host, message, Toast.LENGTH_LONG).show();
+            });
+        }, "playlist-folder-import").start();
     }
 
     private void importPlaylistMedia(int request, Intent data) {
@@ -956,6 +1036,10 @@ final class SettingsPanel {
 
     void onActivityResult(int request, int result, Intent data) {
         if (result != Activity.RESULT_OK || data == null) return;
+        if (request == PICK_PLAYLIST_FOLDER) {
+            if (data.getData() != null) importPlaylistFolder(data.getData());
+            return;
+        }
         if (request == PICK_PLAYLIST_IMAGES || request == PICK_PLAYLIST_VIDEOS) {
             importPlaylistMedia(request, data);
             return;
