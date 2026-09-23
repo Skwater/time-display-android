@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-已创建可导入 Android Studio 的原生 Java 项目。当前版本为 0.6.1，Debug APK 位于 `releases/time-display-0.6.1-debug.apk`。构建和签名已核对；本版设备验收尚未记录，步骤见[测试计划](docs/test-plan.md)。
+已创建可导入 Android Studio 的原生 Java 项目。当前版本为 0.7.0，Debug APK 位于 `releases/time-display-0.7.0-debug.apk`。构建和签名已核对；本版设备验收尚未记录，步骤见[测试计划](docs/test-plan.md)。
 
 ## 运行
 
@@ -34,6 +34,8 @@
 
 0.6.1 修复：切换应用语言后重建页面时，重新应用窗口全屏与沉浸式显示设置，避免通知栏区域出现白条。
 
+0.7.0 更新：右侧新增背景来源切换和播放列表管理。列表可批量添加图片、动图或视频，支持排序、删除、顺序或随机、循环及图片停留时间；图片与视频分别保存显示模式，列表亮度独立于单个背景。列表不提供裁切位置调整，默认以居中填充显示，媒体切换默认淡出淡入，可关闭。
+
 ## 文档
 
 - [产品需求与验收标准](docs/requirements.md)
@@ -56,5 +58,6 @@ app/src/main/java/com/example/timedisplay/
   UiPalette.java          动态按钮颜色与旧系统回退色
   BackgroundImageView.java 图片与动图平铺绘制
   L10n.java                应用语言选择与中英文文案
+  PlaylistStore.java       背景播放列表文件和顺序管理
 docs/                    产品与开发文档
 ```

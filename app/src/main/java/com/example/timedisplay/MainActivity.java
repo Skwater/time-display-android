@@ -31,6 +31,10 @@ import android.widget.Toast;
 import android.widget.VideoView;
 import android.content.Intent;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 public final class MainActivity extends Activity {
     private static final int CLOSED = 0;
     private static final int LEFT = 1;
@@ -53,6 +57,7 @@ public final class MainActivity extends Activity {
     private ScrollView rightPanel;
     private View scrim;
     private View backgroundShade;
+    private View fadeCover;
     private LinearLayout previewControls;
     private ScaleGestureDetector scaleDetector;
     private boolean active;
@@ -67,6 +72,14 @@ public final class MainActivity extends Activity {
     private float downY;
     private boolean gestureConsumed;
     private boolean drawerGestureLocked;
+    private boolean playlistPlayback;
+    private List<PlaylistStore.Entry> playlistItems = new ArrayList<>();
+    private final List<Integer> playlistOrder = new ArrayList<>();
+    private int playlistPosition;
+    private int mediaGeneration;
+    private int playlistFailures;
+    private String requestedPlaylistId;
+    private final Runnable playlistAdvance = this::advancePlaylist;
 
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
@@ -81,6 +94,10 @@ public final class MainActivity extends Activity {
         backgroundShade.setBackgroundColor(Color.BLACK);
         backgroundShade.setAlpha(0f);
         root.addView(backgroundShade, new FrameLayout.LayoutParams(-1, -1));
+        fadeCover = new View(this);
+        fadeCover.setBackgroundColor(Color.BLACK);
+        fadeCover.setAlpha(0f);
+        root.addView(fadeCover, new FrameLayout.LayoutParams(-1, -1));
         face = new ClockFaceView(this);
         root.addView(face, new FrameLayout.LayoutParams(-1, -1));
 
@@ -177,6 +194,9 @@ public final class MainActivity extends Activity {
 
     @Override protected void onPause() {
         active = false;
+        mediaGeneration++;
+        handler.removeCallbacks(playlistAdvance);
+        fadeCover.animate().cancel();
         drawerGestureLocked = false;
         handler.removeCallbacks(tick);
         if (animation != null) animation.stop();
@@ -186,6 +206,7 @@ public final class MainActivity extends Activity {
 
     @Override public void onBackPressed() {
         if (previewMode) finishBackgroundPreview(false);
+        else if (openDrawer == RIGHT && panels.onBackPressed()) return;
         else if (openDrawer != CLOSED) closeDrawer();
         else super.onBackPressed();
     }
@@ -233,9 +254,33 @@ public final class MainActivity extends Activity {
         face.update(System.currentTimeMillis());
         if (ClockSettings.ORIENTATION.equals(key)) applyOrientation();
         if (ClockSettings.PANEL_TRANSPARENCY.equals(key)) updatePanelTransparency();
-        if (ClockSettings.BACKGROUND_DIM.equals(key)) updateBackgroundShade(ClockSettings.of(this));
+        if (ClockSettings.BACKGROUND_DIM.equals(key) || ClockSettings.PLAYLIST_DIM.equals(key))
+            updateBackgroundShade(ClockSettings.of(this));
+        boolean playlistSetting = ClockSettings.PLAYLIST_ITEMS.equals(key)
+                || ClockSettings.PLAYLIST_IMAGE_MODE.equals(key)
+                || ClockSettings.PLAYLIST_VIDEO_MODE.equals(key)
+                || ClockSettings.PLAYLIST_FADE.equals(key)
+                || ClockSettings.PLAYLIST_SHUFFLE.equals(key)
+                || ClockSettings.PLAYLIST_LOOP.equals(key)
+                || ClockSettings.PLAYLIST_INTERVAL.equals(key);
+        if (playlistSetting && !playlistPlayback) return;
         if (ClockSettings.BACKGROUND_URI.equals(key) || ClockSettings.BACKGROUND_MODE.equals(key)
-                || ClockSettings.BACKGROUND_TYPE.equals(key)) loadBackground(ClockSettings.of(this));
+                || ClockSettings.BACKGROUND_TYPE.equals(key)
+                || ClockSettings.BACKGROUND_SOURCE.equals(key)
+                || ClockSettings.PLAYLIST_ITEMS.equals(key)
+                || ClockSettings.PLAYLIST_IMAGE_MODE.equals(key)
+                || ClockSettings.PLAYLIST_VIDEO_MODE.equals(key)
+                || ClockSettings.PLAYLIST_FADE.equals(key)
+                || ClockSettings.PLAYLIST_SHUFFLE.equals(key)
+                || ClockSettings.PLAYLIST_LOOP.equals(key)
+                || ClockSettings.PLAYLIST_INTERVAL.equals(key)) loadBackground(ClockSettings.of(this));
+    }
+
+    void playPlaylistEntry(String id) {
+        requestedPlaylistId = id;
+        SharedPreferences prefs = ClockSettings.of(this);
+        prefs.edit().putString(ClockSettings.BACKGROUND_SOURCE, "playlist").apply();
+        loadBackground(prefs);
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
@@ -345,6 +390,11 @@ public final class MainActivity extends Activity {
 
     void startBackgroundPreview() {
         SharedPreferences prefs = ClockSettings.of(this);
+        if ("playlist".equals(prefs.getString(ClockSettings.BACKGROUND_SOURCE, "single"))) {
+            Toast.makeText(this, L10n.text(this, "播放列表不支持裁切位置调整", "Playlist crop position cannot be adjusted"),
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
         if (prefs.getString(ClockSettings.BACKGROUND_URI, "").isEmpty()) {
             Toast.makeText(this, L10n.text(this, "请先选择图片背景", "Choose an image first"), Toast.LENGTH_SHORT).show();
             return;
@@ -423,7 +473,9 @@ public final class MainActivity extends Activity {
         int width = image.getWidth();
         int height = image.getHeight();
         if (drawable == null || width <= 0 || height <= 0) return;
-        String mode = ClockSettings.of(this).getString(ClockSettings.BACKGROUND_MODE, "fill");
+        SharedPreferences prefs = ClockSettings.of(this);
+        String mode = playlistPlayback ? prefs.getString(ClockSettings.PLAYLIST_IMAGE_MODE, "fill")
+                : prefs.getString(ClockSettings.BACKGROUND_MODE, "fill");
         int sourceWidth = drawable.getIntrinsicWidth();
         int sourceHeight = drawable.getIntrinsicHeight();
         if (sourceWidth <= 0 || sourceHeight <= 0) {
@@ -433,11 +485,12 @@ public final class MainActivity extends Activity {
                     : ImageView.ScaleType.CENTER_CROP);
             return;
         }
-        SharedPreferences prefs = ClockSettings.of(this);
-        float zoom = clamp(previewMode ? previewScale
+        float zoom = playlistPlayback ? 1f : clamp(previewMode ? previewScale
                 : prefs.getFloat(ClockSettings.BACKGROUND_SCALE, 1f), 1f, 4f);
-        float panX = previewMode ? previewPanX : prefs.getFloat(ClockSettings.BACKGROUND_PAN_X, 0f);
-        float panY = previewMode ? previewPanY : prefs.getFloat(ClockSettings.BACKGROUND_PAN_Y, 0f);
+        float panX = playlistPlayback ? 0f : previewMode ? previewPanX
+                : prefs.getFloat(ClockSettings.BACKGROUND_PAN_X, 0f);
+        float panY = playlistPlayback ? 0f : previewMode ? previewPanY
+                : prefs.getFloat(ClockSettings.BACKGROUND_PAN_Y, 0f);
         if ("tile".equals(mode)) {
             image.setTileTransform(true, zoom, panX * width, panY * height);
             return;
@@ -472,6 +525,46 @@ public final class MainActivity extends Activity {
     }
 
     private void loadBackground(SharedPreferences prefs) {
+        handler.removeCallbacks(playlistAdvance);
+        fadeCover.animate().cancel();
+        fadeCover.setAlpha(0f);
+        playlistPlayback = "playlist".equals(prefs.getString(ClockSettings.BACKGROUND_SOURCE, "single"));
+        playlistItems = playlistPlayback ? new PlaylistStore(this).entries() : new ArrayList<>();
+        playlistOrder.clear();
+        playlistPosition = 0;
+        playlistFailures = 0;
+        updateBackgroundShade(prefs);
+        if (playlistPlayback) {
+            for (int i = 0; i < playlistItems.size(); i++) playlistOrder.add(i);
+            if (prefs.getBoolean(ClockSettings.PLAYLIST_SHUFFLE, false)) Collections.shuffle(playlistOrder);
+            if (requestedPlaylistId != null) {
+                for (int i = 0; i < playlistOrder.size(); i++) {
+                    if (playlistItems.get(playlistOrder.get(i)).id.equals(requestedPlaylistId)) {
+                        playlistPosition = i;
+                        break;
+                    }
+                }
+                requestedPlaylistId = null;
+            }
+            if (playlistOrder.isEmpty()) {
+                clearCurrentMedia();
+                return;
+            }
+            showPlaylistItem();
+            return;
+        }
+        String value = prefs.getString(ClockSettings.BACKGROUND_URI, "");
+        if (value.isEmpty()) {
+            clearCurrentMedia();
+            return;
+        }
+        showMedia(Uri.parse(value), prefs.getString(ClockSettings.BACKGROUND_TYPE, "image"),
+                prefs.getString(ClockSettings.BACKGROUND_MODE, "fill"));
+    }
+
+    private void clearCurrentMedia() {
+        mediaGeneration++;
+        handler.removeCallbacks(playlistAdvance);
         if (video != null) {
             video.stopPlayback();
             root.removeView(video);
@@ -482,13 +575,24 @@ public final class MainActivity extends Activity {
             animation = null;
         }
         image.setImageDrawable(null);
-        updateBackgroundShade(prefs);
-        String mode = prefs.getString(ClockSettings.BACKGROUND_MODE, "fill");
-        String value = prefs.getString(ClockSettings.BACKGROUND_URI, "");
-        if (value.isEmpty()) return;
-        Uri uri = Uri.parse(value);
+        image.setTileTransform(false, 1f, 0f, 0f);
+    }
+
+    private void showPlaylistItem() {
+        if (playlistOrder.isEmpty()) return;
+        PlaylistStore.Entry entry = playlistItems.get(playlistOrder.get(playlistPosition));
+        SharedPreferences prefs = ClockSettings.of(this);
+        String mode = "video".equals(entry.type)
+                ? prefs.getString(ClockSettings.PLAYLIST_VIDEO_MODE, "fill")
+                : prefs.getString(ClockSettings.PLAYLIST_IMAGE_MODE, "fill");
+        showMedia(Uri.parse(entry.uri), entry.type, mode);
+    }
+
+    private void showMedia(Uri uri, String type, String mode) {
+        clearCurrentMedia();
+        int generation = mediaGeneration;
         try {
-            if ("video".equals(prefs.getString(ClockSettings.BACKGROUND_TYPE, "image"))) {
+            if ("video".equals(type)) {
                 video = new VideoView(this) {
                     @Override protected void onMeasure(int widthSpec, int heightSpec) {
                         setMeasuredDimension(MeasureSpec.getSize(widthSpec), MeasureSpec.getSize(heightSpec));
@@ -498,21 +602,45 @@ public final class MainActivity extends Activity {
                 root.addView(current, 1, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
                 current.setVideoURI(uri);
                 current.setOnPreparedListener(player -> {
-                    if (video != current || !active) return;
-                    player.setLooping(true);
+                    if (video != current || !active || mediaGeneration != generation) return;
+                    player.setLooping(!playlistPlayback || (playlistItems.size() == 1
+                            && ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_LOOP, true)));
                     player.setVolume(0, 0);
                     root.post(() -> sizeVideo(current, player, mode));
+                    if (playlistPlayback) {
+                        player.setOnInfoListener((media, what, extra) -> {
+                            if (what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START) revealMedia(generation);
+                            return false;
+                        });
+                        current.setOnCompletionListener(media -> {
+                            if (mediaGeneration == generation) advancePlaylist();
+                        });
+                    }
                     current.start();
+                    handler.postDelayed(() -> revealMedia(generation), 1200);
                 });
                 current.setOnErrorListener((player, what, extra) -> {
-                    backgroundShade.setAlpha(0f);
-                    Toast.makeText(this, L10n.text(this, "视频无法播放，请在右侧面板更换背景", "Video cannot play; choose another background"), Toast.LENGTH_LONG).show();
+                    if (mediaGeneration != generation) return true;
+                    if (playlistPlayback) skipFailedPlaylistItem();
+                    else {
+                        backgroundShade.setAlpha(0f);
+                        Toast.makeText(this, L10n.text(this, "视频无法播放，请在右侧面板更换背景", "Video cannot play; choose another background"), Toast.LENGTH_LONG).show();
+                    }
                     return true;
                 });
             } else {
                 Drawable drawable = ImageDecoder.decodeDrawable(ImageDecoder.createSource(getContentResolver(), uri));
                 image.setImageDrawable(drawable);
-                image.post(this::applyBackgroundMatrix);
+                image.post(() -> {
+                    if (mediaGeneration != generation) return;
+                    applyBackgroundMatrix();
+                    revealMedia(generation);
+                    if (playlistPlayback && playlistItems.size() > 1) {
+                        int seconds = Math.max(3, Math.min(60, ClockSettings.of(this)
+                                .getInt(ClockSettings.PLAYLIST_INTERVAL, 10)));
+                        handler.postDelayed(playlistAdvance, seconds * 1000L);
+                    }
+                });
                 if (drawable instanceof AnimatedImageDrawable) {
                     animation = (AnimatedImageDrawable) drawable;
                     animation.setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
@@ -520,14 +648,75 @@ public final class MainActivity extends Activity {
                 }
             }
         } catch (Exception error) {
-            backgroundShade.setAlpha(0f);
-            Toast.makeText(this, L10n.text(this, "背景文件无法打开，请在右侧面板重新选择", "Background cannot be opened; choose it again"), Toast.LENGTH_LONG).show();
+            if (playlistPlayback) skipFailedPlaylistItem();
+            else {
+                backgroundShade.setAlpha(0f);
+                fadeCover.setAlpha(0f);
+                Toast.makeText(this, L10n.text(this, "背景文件无法打开，请在右侧面板重新选择", "Background cannot be opened; choose it again"), Toast.LENGTH_LONG).show();
+            }
         }
     }
 
+    private void revealMedia(int generation) {
+        if (mediaGeneration != generation || !active) return;
+        playlistFailures = 0;
+        if (fadeCover.getAlpha() > 0f) {
+            fadeCover.animate().cancel();
+            fadeCover.animate().alpha(0f).setDuration(250).start();
+        }
+    }
+
+    private void advancePlaylist() {
+        if (!playlistPlayback || !active || playlistItems.size() < 2) return;
+        if (playlistPosition + 1 >= playlistOrder.size()
+                && !ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_LOOP, true)) return;
+        if (ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_FADE, true)) {
+            int generation = mediaGeneration;
+            fadeCover.animate().cancel();
+            fadeCover.animate().alpha(1f).setDuration(250).withEndAction(() -> {
+                if (mediaGeneration == generation && active) showNextPlaylistItem();
+            }).start();
+        } else showNextPlaylistItem();
+    }
+
+    private void showNextPlaylistItem() {
+        playlistPosition++;
+        if (playlistPosition >= playlistOrder.size()) {
+            playlistPosition = 0;
+            if (ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_SHUFFLE, false)) {
+                Collections.shuffle(playlistOrder);
+            }
+        }
+        showPlaylistItem();
+    }
+
+    private void skipFailedPlaylistItem() {
+        playlistFailures++;
+        if (playlistFailures >= playlistItems.size()) {
+            clearCurrentMedia();
+            fadeCover.setAlpha(0f);
+            Toast.makeText(this, L10n.text(this, "播放列表中的媒体无法打开", "Playlist media could not be opened"),
+                    Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (playlistPosition + 1 >= playlistOrder.size()
+                && !ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_LOOP, true)) {
+            clearCurrentMedia();
+            fadeCover.setAlpha(0f);
+            Toast.makeText(this, L10n.text(this, "播放列表末项无法打开", "The last playlist item could not be opened"),
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        handler.post(this::showNextPlaylistItem);
+    }
+
     private void updateBackgroundShade(SharedPreferences prefs) {
-        boolean hasBackground = !prefs.getString(ClockSettings.BACKGROUND_URI, "").isEmpty();
-        int dim = Math.max(0, Math.min(70, prefs.getInt(ClockSettings.BACKGROUND_DIM, 0)));
+        boolean hasBackground = "playlist".equals(prefs.getString(ClockSettings.BACKGROUND_SOURCE, "single"))
+                ? !new PlaylistStore(this).entries().isEmpty()
+                : !prefs.getString(ClockSettings.BACKGROUND_URI, "").isEmpty();
+        int dim = Math.max(0, Math.min(70, prefs.getInt(
+                "playlist".equals(prefs.getString(ClockSettings.BACKGROUND_SOURCE, "single"))
+                        ? ClockSettings.PLAYLIST_DIM : ClockSettings.BACKGROUND_DIM, 0)));
         backgroundShade.setAlpha(hasBackground ? dim / 100f : 0f);
     }
 

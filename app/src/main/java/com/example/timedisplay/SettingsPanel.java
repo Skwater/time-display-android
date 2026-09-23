@@ -2,11 +2,13 @@ package com.example.timedisplay;
 
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
+import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
+import android.graphics.ImageDecoder;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -14,11 +16,13 @@ import android.os.Build;
 import android.provider.OpenableColumns;
 import android.provider.MediaStore;
 import android.view.MotionEvent;
+import android.view.DragEvent;
 import android.view.View;
 import android.view.Gravity;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.ScrollView;
@@ -43,6 +47,8 @@ final class SettingsPanel {
     private static final int PICK_IMAGE = 1;
     private static final int PICK_FONT = 2;
     private static final int PICK_VIDEO = 3;
+    private static final int PICK_PLAYLIST_IMAGES = 4;
+    private static final int PICK_PLAYLIST_VIDEOS = 5;
     private static final String[] ZONES = {
             "SYSTEM", "UTC", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei",
             "Asia/Tokyo", "Asia/Seoul", "Asia/Singapore", "Asia/Manila",
@@ -62,6 +68,8 @@ final class SettingsPanel {
     };
     private static final String[] ORIENTATION_VALUES = {"auto", "portrait", "landscape"};
     private static final String[] MODE_VALUES = {"fill", "fit", "stretch", "tile"};
+    private static final String[] VIDEO_MODE_VALUES = {"fill", "fit", "stretch"};
+    private static final String[] SOURCE_VALUES = {"single", "playlist"};
     private static final String[] LANGUAGE_VALUES = {"system", "zh", "en"};
     private static final String[] FONT_VALUES = {"system", "sans", "serif", "mono"};
     private static final String[] COLOR_KEYS = {ClockSettings.FONT_OPACITY,
@@ -70,6 +78,7 @@ final class SettingsPanel {
     private final MainActivity host;
     private final SharedPreferences prefs;
     private final FontLibrary fonts;
+    private final PlaylistStore playlist;
     private final List<Button> buttons = new ArrayList<>();
     private final List<SeekBar> sliders = new ArrayList<>();
     private final List<Switch> switches = new ArrayList<>();
@@ -83,11 +92,19 @@ final class SettingsPanel {
     private View colorPreview;
     private LinearLayout colorControls;
     private PopupWindow fontPopup;
+    private ScrollView customizationPanel;
+    private LinearLayout customizationHome;
+    private LinearLayout playlistPage;
+    private LinearLayout playlistList;
+    private TextView playlistInfo;
+    private Spinner backgroundSourceSpinner;
+    private LinearLayout singleBackgroundControls;
 
     SettingsPanel(MainActivity host) {
         this.host = host;
         this.prefs = ClockSettings.of(host);
         this.fonts = new FontLibrary(host, prefs);
+        this.playlist = new PlaylistStore(host);
     }
 
     void refreshAccent() {
@@ -157,8 +174,18 @@ final class SettingsPanel {
 
     ScrollView createCustomizationPanel() {
         ScrollView panel = createPanel(t("自定义", "Customize"));
+        customizationPanel = panel;
         hint(t("向右滑动或点击面板外侧关闭", "Swipe right or tap outside to close"));
         section(t("背景", "Background"));
+        backgroundSourceSpinner = spinner(t("背景来源", "Background source"),
+                new String[]{t("单个背景", "Single background"), t("播放列表", "Playlist")},
+                SOURCE_VALUES, ClockSettings.BACKGROUND_SOURCE, "single");
+        LinearLayout backgroundRoot = content;
+        singleBackgroundControls = new LinearLayout(host);
+        singleBackgroundControls.setOrientation(LinearLayout.VERTICAL);
+        backgroundRoot.addView(singleBackgroundControls);
+        content = singleBackgroundControls;
+        section(t("单个背景", "Single background"));
         spinner(t("背景适配", "Image layout"),
                 new String[]{t("填充", "Fill"), t("适应", "Fit"), t("拉伸", "Stretch"), t("平铺", "Tile")},
                 MODE_VALUES, ClockSettings.BACKGROUND_MODE, "fill");
@@ -208,6 +235,9 @@ final class SettingsPanel {
             updateInfo();
             host.onSettingChanged(ClockSettings.BACKGROUND_URI);
         });
+        content = backgroundRoot;
+        updateSingleBackgroundControls();
+        button(t("管理播放列表", "Manage playlist"), v -> showPlaylistPage());
         section(t("字体", "Font"));
         createFontMenu();
         toggle(t("文字加粗", "Bold text"), ClockSettings.FONT_BOLD, false);
@@ -225,7 +255,133 @@ final class SettingsPanel {
         hint(t("视频背景静音循环播放；长时间亮屏可能增加耗电。",
                 "Videos play silently on a loop; keeping the screen on uses power."));
         updateInfo();
+        createPlaylistPage();
         return panel;
+    }
+
+    boolean onBackPressed() {
+        if (playlistPage != null && playlistPage.getVisibility() == View.VISIBLE) {
+            showCustomizationHome();
+            return true;
+        }
+        return false;
+    }
+
+    private void showPlaylistPage() {
+        customizationHome.setVisibility(View.GONE);
+        playlistPage.setVisibility(View.VISIBLE);
+        refreshPlaylistList();
+        customizationPanel.scrollTo(0, 0);
+    }
+
+    private void showCustomizationHome() {
+        playlistPage.setVisibility(View.GONE);
+        customizationHome.setVisibility(View.VISIBLE);
+        customizationPanel.scrollTo(0, 0);
+    }
+
+    private void updateSingleBackgroundControls() {
+        if (singleBackgroundControls != null) {
+            singleBackgroundControls.setVisibility("playlist".equals(prefs.getString(
+                    ClockSettings.BACKGROUND_SOURCE, "single")) ? View.GONE : View.VISIBLE);
+        }
+    }
+
+    private void createPlaylistPage() {
+        LinearLayout pageRoot = content;
+        customizationHome = new LinearLayout(host);
+        customizationHome.setOrientation(LinearLayout.VERTICAL);
+        while (pageRoot.getChildCount() > 0) {
+            View child = pageRoot.getChildAt(0);
+            pageRoot.removeViewAt(0);
+            customizationHome.addView(child);
+        }
+        pageRoot.addView(customizationHome);
+        playlistPage = new LinearLayout(host);
+        playlistPage.setOrientation(LinearLayout.VERTICAL);
+        playlistPage.setVisibility(View.GONE);
+        pageRoot.addView(playlistPage);
+        content = playlistPage;
+        button(t("‹ 返回自定义", "‹ Back to customize"), v -> showCustomizationHome());
+        section(t("播放列表", "Playlist"));
+        hint(t("长按项目可拖动排序；也可使用上下箭头。", "Long press to reorder, or use the arrows."));
+        playlistInfo = label("", 14);
+        content.addView(playlistInfo);
+        playlistList = new LinearLayout(host);
+        playlistList.setOrientation(LinearLayout.VERTICAL);
+        content.addView(playlistList);
+        LinearLayout addButtons = new LinearLayout(host);
+        addButtons.setOrientation(LinearLayout.HORIZONTAL);
+        Button addImages = createButton(t("添加图片", "Add images"), v -> pickPlaylistImages());
+        Button addVideos = createButton(t("添加视频", "Add videos"), v -> pickPlaylistVideos());
+        LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        half.setMargins(0, dp(6), dp(3), 0);
+        addButtons.addView(addImages, half);
+        LinearLayout.LayoutParams otherHalf = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        otherHalf.setMargins(dp(3), dp(6), 0, 0);
+        addButtons.addView(addVideos, otherHalf);
+        content.addView(addButtons);
+        section(t("播放设置", "Playback settings"));
+        TextView playlistBrightnessInfo = label("", 16);
+        content.addView(playlistBrightnessInfo);
+        SeekBar playlistBrightness = new SeekBar(host);
+        playlistBrightness.setMax(70);
+        playlistBrightness.setProgress(Math.max(0, Math.min(70,
+                prefs.getInt(ClockSettings.PLAYLIST_DIM, 0))));
+        playlistBrightnessInfo.setText(t("列表背景亮度：", "Playlist brightness: ")
+                + (100 - playlistBrightness.getProgress()) + "%");
+        tintSlider(playlistBrightness);
+        protectSlider(playlistBrightness);
+        playlistBrightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                playlistBrightnessInfo.setText(t("列表背景亮度：", "Playlist brightness: ")
+                        + (100 - progress) + "%");
+                if (fromUser) {
+                    prefs.edit().putInt(ClockSettings.PLAYLIST_DIM, progress).apply();
+                    host.onSettingChanged(ClockSettings.PLAYLIST_DIM);
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
+        content.addView(playlistBrightness, new LinearLayout.LayoutParams(-1, dp(48)));
+        spinner(t("图片和动图显示模式", "Image and animation layout"),
+                new String[]{t("填充", "Fill"), t("适应", "Fit"), t("拉伸", "Stretch"), t("平铺", "Tile")},
+                MODE_VALUES, ClockSettings.PLAYLIST_IMAGE_MODE, "fill");
+        spinner(t("视频显示模式", "Video layout"),
+                new String[]{t("填充", "Fill"), t("适应", "Fit"), t("拉伸", "Stretch")},
+                VIDEO_MODE_VALUES, ClockSettings.PLAYLIST_VIDEO_MODE, "fill");
+        toggle(t("切换淡出淡入", "Fade between items"), ClockSettings.PLAYLIST_FADE, true);
+        toggle(t("随机顺序", "Shuffle"), ClockSettings.PLAYLIST_SHUFFLE, false);
+        toggle(t("循环播放", "Loop playlist"), ClockSettings.PLAYLIST_LOOP, true);
+        TextView intervalLabel = label("", 16);
+        content.addView(intervalLabel);
+        SeekBar interval = new SeekBar(host);
+        interval.setMax(57);
+        interval.setProgress(Math.max(3, Math.min(60,
+                prefs.getInt(ClockSettings.PLAYLIST_INTERVAL, 10))) - 3);
+        intervalLabel.setText(t("图片停留时间：", "Image duration: ")
+                + (interval.getProgress() + 3) + t(" 秒", " s"));
+        tintSlider(interval);
+        protectSlider(interval);
+        interval.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int seconds = progress + 3;
+                intervalLabel.setText(t("图片停留时间：", "Image duration: ")
+                        + seconds + t(" 秒", " s"));
+                if (fromUser) {
+                    prefs.edit().putInt(ClockSettings.PLAYLIST_INTERVAL, seconds).apply();
+                    host.onSettingChanged(ClockSettings.PLAYLIST_INTERVAL);
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
+        content.addView(interval, new LinearLayout.LayoutParams(-1, dp(48)));
+        hint(t("图片和动图按停留时间切换；视频播完后切换。填充模式居中裁切。",
+                "Images and animations use this duration; videos advance when they end. Fill crops from center."));
+        content = pageRoot;
+        refreshPlaylistList();
     }
 
     private ScrollView createPanel(String title) {
@@ -289,7 +445,7 @@ final class SettingsPanel {
         });
     }
 
-    private void spinner(String title, String[] labels, String[] values, String key, String fallback) {
+    private Spinner spinner(String title, String[] labels, String[] values, String key, String fallback) {
         content.addView(label(title, 16));
         Spinner spinner = new Spinner(host);
         ArrayAdapter<String> adapter = new ArrayAdapter<String>(host, android.R.layout.simple_spinner_item, labels) {
@@ -317,11 +473,13 @@ final class SettingsPanel {
                 String value = values[position];
                 if (!value.equals(prefs.getString(key, fallback))) {
                     prefs.edit().putString(key, value).apply();
+                    if (ClockSettings.BACKGROUND_SOURCE.equals(key)) updateSingleBackgroundControls();
                     host.onSettingChanged(key);
                 }
             }
             @Override public void onNothingSelected(AdapterView<?> parent) { }
         });
+        return spinner;
     }
 
     private void toggle(String title, String key, boolean fallback) {
@@ -592,6 +750,173 @@ final class SettingsPanel {
         slider.setProgressDrawable(track);
     }
 
+    private void refreshPlaylistList() {
+        if (playlistList == null) return;
+        List<PlaylistStore.Entry> items = playlist.entries();
+        playlistInfo.setText(t("共 ", "Total: ") + items.size() + t(" 项", " items"));
+        playlistList.removeAllViews();
+        if (items.isEmpty()) {
+            TextView empty = label(t("列表为空，请添加图片或视频。", "The list is empty. Add images or videos."), 14);
+            empty.setPadding(0, dp(12), 0, dp(12));
+            playlistList.addView(empty);
+            return;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            PlaylistStore.Entry entry = items.get(i);
+            int position = i;
+            LinearLayout row = new LinearLayout(host);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setPadding(0, dp(3), 0, dp(3));
+            row.setBackgroundColor(i % 2 == 0 ? 0x332F435D : 0x222F435D);
+            if ("image".equals(entry.type)) {
+                ImageView thumbnail = new ImageView(host);
+                thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                try {
+                    thumbnail.setImageBitmap(ImageDecoder.decodeBitmap(ImageDecoder.createSource(
+                            host.getContentResolver(), Uri.parse(entry.uri)), (decoder, info, source) -> {
+                        int width = info.getSize().getWidth();
+                        int height = info.getSize().getHeight();
+                        float ratio = Math.min(1f, dp(48) / (float) Math.max(width, height));
+                        decoder.setTargetSize(Math.max(1, Math.round(width * ratio)),
+                                Math.max(1, Math.round(height * ratio)));
+                    }));
+                } catch (Exception ignored) {
+                    thumbnail.setBackgroundColor(0xFF52647A);
+                }
+                row.addView(thumbnail, new LinearLayout.LayoutParams(dp(44), dp(44)));
+            } else {
+                TextView videoIcon = label("▶", 21);
+                videoIcon.setGravity(Gravity.CENTER);
+                videoIcon.setBackgroundColor(0xFF52647A);
+                row.addView(videoIcon, new LinearLayout.LayoutParams(dp(44), dp(44)));
+            }
+            TextView name = label(entry.name, 14);
+            name.setSingleLine(true);
+            name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            name.setPadding(dp(8), 0, dp(2), 0);
+            name.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(name, new LinearLayout.LayoutParams(0, dp(48), 1f));
+            row.addView(playlistAction("↑", t("上移 ", "Move up ") + entry.name, () -> {
+                if (playlist.move(entry.id, -1)) playlistChanged();
+            }), new LinearLayout.LayoutParams(dp(26), dp(48)));
+            row.addView(playlistAction("↓", t("下移 ", "Move down ") + entry.name, () -> {
+                if (playlist.move(entry.id, 1)) playlistChanged();
+            }), new LinearLayout.LayoutParams(dp(26), dp(48)));
+            row.addView(playlistAction("×", t("删除 ", "Delete ") + entry.name, () -> {
+                if (playlist.remove(entry.id)) playlistChanged();
+                else toast(t("删除失败", "Could not delete item"));
+            }), new LinearLayout.LayoutParams(dp(30), dp(48)));
+            row.setOnLongClickListener(v -> {
+                ClipData data = ClipData.newPlainText("playlist-entry", entry.id);
+                return v.startDragAndDrop(data, new View.DragShadowBuilder(v), null, 0);
+            });
+            row.setOnClickListener(v -> {
+                prefs.edit().putString(ClockSettings.BACKGROUND_SOURCE, "playlist").apply();
+                updateSingleBackgroundControls();
+                if (backgroundSourceSpinner != null) backgroundSourceSpinner.setSelection(1);
+                host.playPlaylistEntry(entry.id);
+            });
+            row.setOnDragListener((v, event) -> {
+                if (event.getAction() == DragEvent.ACTION_DRAG_STARTED) return true;
+                if (event.getAction() == DragEvent.ACTION_DROP) {
+                    CharSequence dragged = event.getClipData().getItemAt(0).getText();
+                    if (dragged != null && playlist.moveTo(dragged.toString(), position)) playlistChanged();
+                    return true;
+                }
+                return true;
+            });
+            playlistList.addView(row, new LinearLayout.LayoutParams(-1, dp(54)));
+        }
+    }
+
+    private TextView playlistAction(String text, String description, Runnable click) {
+        TextView action = label(text, 20);
+        action.setGravity(Gravity.CENTER);
+        action.setTextColor(UiPalette.accent(host));
+        action.setContentDescription(description);
+        action.setOnClickListener(v -> click.run());
+        return action;
+    }
+
+    private void playlistChanged() {
+        refreshPlaylistList();
+        host.onSettingChanged(ClockSettings.PLAYLIST_ITEMS);
+    }
+
+    private void pickPlaylistImages() {
+        Intent intent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+            intent.setType("image/*");
+            intent.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
+                    Math.min(20, MediaStore.getPickImagesMaxLimit()));
+        } else {
+            intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent.setType("image/*");
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            host.startActivityForResult(intent, PICK_PLAYLIST_IMAGES);
+        } catch (ActivityNotFoundException unavailable) {
+            Intent fallback = new Intent(Intent.ACTION_GET_CONTENT);
+            fallback.setType("image/*");
+            fallback.addCategory(Intent.CATEGORY_OPENABLE);
+            fallback.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            host.startActivityForResult(fallback, PICK_PLAYLIST_IMAGES);
+        }
+    }
+
+    private void pickPlaylistVideos() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("video/*");
+        intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        host.startActivityForResult(intent, PICK_PLAYLIST_VIDEOS);
+    }
+
+    private void importPlaylistMedia(int request, Intent data) {
+        List<Uri> selected = new ArrayList<>();
+        if (data.getClipData() != null) {
+            for (int i = 0; i < data.getClipData().getItemCount(); i++) {
+                selected.add(data.getClipData().getItemAt(i).getUri());
+            }
+        } else if (data.getData() != null) selected.add(data.getData());
+        int added = 0;
+        int failed = 0;
+        for (Uri uri : selected) {
+            try {
+                String mime = host.getContentResolver().getType(uri);
+                boolean image = request == PICK_PLAYLIST_IMAGES;
+                if (mime != null && !mime.startsWith(image ? "image/" : "video/")) {
+                    failed++;
+                    continue;
+                }
+                String name = displayName(uri);
+                if (image) playlist.addImage(uri, name);
+                else {
+                    host.getContentResolver().takePersistableUriPermission(uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    playlist.addVideo(uri, name);
+                }
+                added++;
+            } catch (Exception error) {
+                failed++;
+            }
+        }
+        if (added > 0) {
+            prefs.edit().putString(ClockSettings.BACKGROUND_SOURCE, "playlist").apply();
+            updateSingleBackgroundControls();
+            if (backgroundSourceSpinner != null) backgroundSourceSpinner.setSelection(1);
+            playlistChanged();
+        }
+        if (failed > 0) toast(t("部分文件导入失败：", "Files not imported: ") + failed);
+        else if (added > 0) toast(t("已添加 ", "Added ") + added + t(" 项", " items"));
+    }
+
     private void pickImage() {
         Intent intent;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -630,7 +955,12 @@ final class SettingsPanel {
     }
 
     void onActivityResult(int request, int result, Intent data) {
-        if (result != Activity.RESULT_OK || data == null || data.getData() == null) return;
+        if (result != Activity.RESULT_OK || data == null) return;
+        if (request == PICK_PLAYLIST_IMAGES || request == PICK_PLAYLIST_VIDEOS) {
+            importPlaylistMedia(request, data);
+            return;
+        }
+        if (data.getData() == null) return;
         Uri uri = data.getData();
         if (request == PICK_IMAGE) {
             try {

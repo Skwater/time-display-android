@@ -22,6 +22,15 @@ final class ClockSettings {
     static final String BACKGROUND_SCALE = "background_scale";
     static final String BACKGROUND_PAN_X = "background_pan_x";
     static final String BACKGROUND_PAN_Y = "background_pan_y";
+    static final String BACKGROUND_SOURCE = "background_source";
+    static final String PLAYLIST_ITEMS = "playlist_items";
+    static final String PLAYLIST_IMAGE_MODE = "playlist_image_mode";
+    static final String PLAYLIST_VIDEO_MODE = "playlist_video_mode";
+    static final String PLAYLIST_FADE = "playlist_fade";
+    static final String PLAYLIST_SHUFFLE = "playlist_shuffle";
+    static final String PLAYLIST_LOOP = "playlist_loop";
+    static final String PLAYLIST_INTERVAL = "playlist_interval";
+    static final String PLAYLIST_DIM = "playlist_dim";
     static final String PANEL_TRANSPARENCY = "panel_transparency";
     static final String FONT = "font";
     static final String FONT_FILE = "font_file";
