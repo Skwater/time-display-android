@@ -106,18 +106,22 @@ final class ClockFaceView extends View {
 
     private Typeface loadTypeface(SharedPreferences prefs) {
         String style = prefs.getString(ClockSettings.FONT, "system");
+        boolean bold = prefs.getBoolean(ClockSettings.FONT_BOLD, false);
         Typeface base = Typeface.DEFAULT;
-        if ("sans".equals(style)) base = Typeface.create("sans-serif-light", Typeface.NORMAL);
-        if ("custom".equals(style)) {
-            String path = prefs.getString(ClockSettings.FONT_FILE, "");
-            if (!path.isEmpty()) {
-                try { base = Typeface.createFromFile(new File(path)); } catch (Exception ignored) { }
+        try {
+            if ("sans".equals(style)) base = Typeface.create("sans-serif-light", Typeface.NORMAL);
+            if ("serif".equals(style)) base = Typeface.SERIF;
+            if ("mono".equals(style)) base = Typeface.MONOSPACE;
+            if ("custom".equals(style)) {
+                String path = prefs.getString(ClockSettings.FONT_FILE, "");
+                if (!path.isEmpty()) base = Typeface.createFromFile(new File(path));
             }
+            if (base == null) base = Typeface.DEFAULT;
+            Typeface selected = Typeface.create(base, bold ? Typeface.BOLD : Typeface.NORMAL);
+            return selected == null ? (bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT) : selected;
+        } catch (RuntimeException ignored) {
+            return bold ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT;
         }
-        if ("serif".equals(style)) base = Typeface.SERIF;
-        if ("mono".equals(style)) base = Typeface.MONOSPACE;
-        return Typeface.create(base, prefs.getBoolean(ClockSettings.FONT_BOLD, false)
-                ? Typeface.BOLD : Typeface.NORMAL);
     }
 
     private float dp(float value) { return value * getResources().getDisplayMetrics().density; }

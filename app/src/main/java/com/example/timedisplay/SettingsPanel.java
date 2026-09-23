@@ -185,7 +185,7 @@ final class SettingsPanel {
             host.onSettingChanged(ClockSettings.BACKGROUND_URI);
         });
         section("字体");
-        spinner("字体样式", new String[]{"默认字体", "轻体无衬线", "系统衬线", "系统等宽", "自定义字体"},
+        spinner("字体样式", new String[]{"默认字体", "轻体无衬线", "衬线", "等宽", "自定义字体"},
                 FONT_VALUES, ClockSettings.FONT, "system");
         toggle("文字加粗", ClockSettings.FONT_BOLD, false);
         toggle("文字阴影", ClockSettings.TEXT_SHADOW, true);
