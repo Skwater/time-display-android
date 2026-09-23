@@ -69,7 +69,7 @@
 - 新增任何与源码无关的临时文件统一放入 `.tmp/`，垃圾/废弃文件统一移入 `.trash/`；两个目录均不纳入版本控制。
 - **所有文件禁止直接删除**，一律移动到 `.trash/` 中保留。
 - 文档只允许上传 `README.md`；`docs/` 目录中的其余文档保留在本地，不随 Git 上传。
-- 签名密钥 `app/signing/time-display-debug.keystore` 由 `.gitignore` 排除，请自行离线备份。
+- 签名密钥 `app/signing/time-display-debug.keystore` 与其凭据 `keystore.properties` 均由 `.gitignore` 排除，请自行离线备份；`app/build.gradle` 只从 `keystore.properties` 读取签名信息，不写死密码明文。
 
 ## 目录
 
