@@ -1,6 +1,7 @@
 package com.example.timedisplay;
 
 import android.app.Activity;
+import android.content.ActivityNotFoundException;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
@@ -8,7 +9,9 @@ import android.database.Cursor;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.net.Uri;
+import android.os.Build;
 import android.provider.OpenableColumns;
+import android.provider.MediaStore;
 import android.view.MotionEvent;
 import android.view.View;
 import android.widget.AdapterView;
@@ -25,6 +28,8 @@ import android.widget.Toast;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
@@ -33,8 +38,9 @@ import java.util.List;
 import java.util.Locale;
 
 final class SettingsPanel {
-    private static final int PICK_BACKGROUND = 1;
+    private static final int PICK_IMAGE = 1;
     private static final int PICK_FONT = 2;
+    private static final int PICK_VIDEO = 3;
     private static final String[] ZONES = {
             "SYSTEM", "UTC", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei",
             "Asia/Tokyo", "Asia/Seoul", "Asia/Singapore", "Asia/Manila",
@@ -159,7 +165,17 @@ final class SettingsPanel {
         hint("100% 为原图亮度；向右拖动可降低背景亮度。");
         backgroundInfo = label("", 14);
         content.addView(backgroundInfo);
-        button("选择图片、动图或视频", v -> pickBackground());
+        LinearLayout mediaButtons = new LinearLayout(host);
+        mediaButtons.setOrientation(LinearLayout.HORIZONTAL);
+        Button imageButton = createButton("选择图片", v -> pickImage());
+        Button videoButton = createButton("选择视频", v -> pickVideo());
+        LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        LinearLayout.LayoutParams videoParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
+        imageParams.setMargins(0, dp(6), dp(3), 0);
+        videoParams.setMargins(dp(3), dp(6), 0, 0);
+        mediaButtons.addView(imageButton, imageParams);
+        mediaButtons.addView(videoButton, videoParams);
+        content.addView(mediaButtons);
         button("预览并调整背景位置", v -> host.startBackgroundPreview());
         button("恢复默认背景", v -> {
             prefs.edit().remove(ClockSettings.BACKGROUND_URI).remove(ClockSettings.BACKGROUND_TYPE)
@@ -324,24 +340,49 @@ final class SettingsPanel {
     }
 
     private void button(String text, View.OnClickListener click) {
+        Button button = createButton(text, click);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(50));
+        params.topMargin = dp(6);
+        content.addView(button, params);
+    }
+
+    private Button createButton(String text, View.OnClickListener click) {
         Button button = new Button(host);
         button.setText(text);
         button.setTextColor(Color.WHITE);
         button.setBackgroundTintList(ColorStateList.valueOf(UiPalette.accent(host)));
         buttons.add(button);
         button.setOnClickListener(click);
-        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(50));
-        params.topMargin = dp(6);
-        content.addView(button, params);
+        return button;
     }
 
-    private void pickBackground() {
+    private void pickImage() {
+        Intent intent;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent = new Intent(MediaStore.ACTION_PICK_IMAGES);
+            intent.setType("image/*");
+        } else {
+            intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+            intent.setDataAndType(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*");
+        }
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try {
+            host.startActivityForResult(intent, PICK_IMAGE);
+        } catch (ActivityNotFoundException unavailable) {
+            Intent fallback = new Intent(Intent.ACTION_GET_CONTENT);
+            fallback.setType("image/*");
+            fallback.addCategory(Intent.CATEGORY_OPENABLE);
+            fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            host.startActivityForResult(fallback, PICK_IMAGE);
+        }
+    }
+
+    private void pickVideo() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("*/*");
-        intent.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{"image/*", "video/*"});
+        intent.setType("video/*");
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        host.startActivityForResult(intent, PICK_BACKGROUND);
+        host.startActivityForResult(intent, PICK_VIDEO);
     }
 
     private void pickFont() {
@@ -355,23 +396,46 @@ final class SettingsPanel {
     void onActivityResult(int request, int result, Intent data) {
         if (result != Activity.RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
-        if (request == PICK_BACKGROUND) {
+        if (request == PICK_IMAGE) {
             try {
-                host.getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
                 String mime = host.getContentResolver().getType(uri);
-                if (mime == null || (!mime.startsWith("image/") && !mime.startsWith("video/"))) {
-                    toast("请选择图片、动图或视频文件");
+                if (mime != null && !mime.startsWith("image/")) {
+                    toast("请选择图片文件");
                     return;
                 }
-                prefs.edit().putString(ClockSettings.BACKGROUND_URI, uri.toString())
-                        .putString(ClockSettings.BACKGROUND_TYPE, mime.startsWith("video/") ? "video" : "image")
+                File temporary = new File(host.getFilesDir(), "background-image-importing");
+                File target = new File(host.getFilesDir(), "background-image");
+                try (InputStream input = host.getContentResolver().openInputStream(uri)) {
+                    if (input == null) throw new IllegalArgumentException("图片无法读取");
+                    Files.copy(input, temporary.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                }
+                Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                prefs.edit().putString(ClockSettings.BACKGROUND_URI, Uri.fromFile(target).toString())
+                        .putString(ClockSettings.BACKGROUND_TYPE, "image")
                         .remove(ClockSettings.BACKGROUND_SCALE).remove(ClockSettings.BACKGROUND_PAN_X)
                         .remove(ClockSettings.BACKGROUND_PAN_Y)
                         .apply();
                 updateInfo();
                 host.onSettingChanged(ClockSettings.BACKGROUND_URI);
             } catch (Exception error) {
-                toast("无法保存背景文件的访问权限");
+                toast("图片导入失败，请重试");
+            }
+        } else if (request == PICK_VIDEO) {
+            try {
+                String mime = host.getContentResolver().getType(uri);
+                if (mime == null || !mime.startsWith("video/")) {
+                    toast("请选择视频文件");
+                    return;
+                }
+                host.getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                prefs.edit().putString(ClockSettings.BACKGROUND_URI, uri.toString())
+                        .putString(ClockSettings.BACKGROUND_TYPE, "video")
+                        .remove(ClockSettings.BACKGROUND_SCALE).remove(ClockSettings.BACKGROUND_PAN_X)
+                        .remove(ClockSettings.BACKGROUND_PAN_Y).apply();
+                updateInfo();
+                host.onSettingChanged(ClockSettings.BACKGROUND_URI);
+            } catch (Exception error) {
+                toast("无法保存视频文件的访问权限");
             }
         } else if (request == PICK_FONT) {
             String name = displayName(uri).toLowerCase(Locale.ROOT);

@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-已创建可导入 Android Studio 的原生 Java 项目。0.4.0 Debug APK 位于 `releases/time-display-0.4.0-debug.apk`，构建原件位于 `app/build/outputs/apk/debug/app-debug.apk`。构建与签名校验已通过；尚未完成设备实测，验收步骤见 [测试计划](docs/test-plan.md)。
+已创建可导入 Android Studio 的原生 Java 项目。0.4.1 Debug APK 位于 `releases/time-display-0.4.1-debug.apk`，构建原件位于 `app/build/outputs/apk/debug/app-debug.apk`。构建与签名校验已通过；尚未完成设备实测，验收步骤见 [测试计划](docs/test-plan.md)。
 
 ## 运行
 
@@ -12,13 +12,15 @@
 2. 使用 JDK 17、Android SDK Platform 36，同步 Gradle。
 3. 在 Android 9（API 28）及以上的设备或模拟器运行 `app`。
 4. 在时钟页**向右滑**打开左侧设置面板；**向左滑**打开右侧自定义面板。反向滑动、点击面板外侧或按返回键可关闭。面板宽度最多为屏幕的 82%，保留时钟可见区域。
-5. 左侧面板可调整侧栏背景透明度。右侧面板选择图片后，点“预览并调整背景位置”：单指平移、双指缩放，再用底部“重置”“保存”“取消”决定是否保留。视频背景暂不支持位置调整。
+5. 左侧面板可调整侧栏背景透明度。右侧面板并排提供“选择图片”和“选择视频”：图片从相册选取，视频从文件选择器选取。选择图片后，点“预览并调整背景位置”：单指平移、双指缩放，再用底部“重置”“保存”“取消”决定是否保留。视频背景暂不支持位置调整。
 
 项目使用 Android Gradle Plugin 8.13.2 与 Gradle 8.13。Gradle wrapper 已包含；首次同步需要获取 Gradle 与插件依赖。本次构建用的 SDK 和 Gradle 放在项目的 `.tooling/`，已由 `.gitignore` 排除。无需网络权限，时间来自设备系统时钟。
 
 本机 Debug 构建使用[项目内的签名密钥](app/signing/README.md)。0.2.0 起的 Debug APK 使用同一证书，SHA-256 为 `9E:2A:7F:51:06:CA:4D:71:91:3F:FF:F1:EC:C2:4A:21:20:88:9E:B0:6A:3E:BA:D2:15:5E:87:E6:0B:AD:07:03`，可在签名相同的前提下覆盖安装。密钥留在本机并被 Git 忽略；从 Git 检出的项目若没有密钥，可正常构建，但默认 Debug 签名无法覆盖安装此前的 APK。
 
 0.4.0 更新：按钮使用 Android 12 及以上的系统动态强调色，旧系统使用固定颜色；新增侧栏透明度、主要时区及当前 UTC 偏移前缀、图片位置预览。
+
+0.4.1 更新：将背景导入拆为并排的图片和视频按钮；图片优先调用系统相册选图界面，视频沿用文件选择器。
 
 ## 文档
 

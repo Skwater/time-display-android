@@ -10,7 +10,7 @@
 | 日期时间 | `java.time`、IANA `ZoneId` | 用系统时区规则处理夏令时。 |
 | 中国农历 | Android ICU `ChineseCalendar` | 系统 API，无需外部数据表。 |
 | 本地数据 | `SharedPreferences` | 设置项少且无需数据库查询。 |
-| 媒体选择 | `ACTION_OPEN_DOCUMENT` | 使用系统文件选择器和持久读取授权。 |
+| 媒体选择 | 图片：`ACTION_PICK_IMAGES` / `ACTION_PICK`；视频：`ACTION_OPEN_DOCUMENT` | 图片优先打开相册并复制到应用目录；视频使用文件选择器和持久读取授权。 |
 
 Android 官方资料：[AGP 8.13 兼容要求](https://developer.android.com/build/releases/agp-8-13-0-release-notes)、[ChineseCalendar API](https://developer.android.com/reference/android/icu/util/ChineseCalendar)、[ImageDecoder API](https://developer.android.com/reference/android/graphics/ImageDecoder)、[ACTION_OPEN_DOCUMENT](https://developer.android.com/reference/android/content/Intent#ACTION_OPEN_DOCUMENT)。
 
@@ -28,7 +28,7 @@ SettingsPanel ──写入──> SharedPreferences
 - `MainActivity` 创建背景层、可调暗度层、时钟层和双侧抽屉；暗度默认为 0。在 `onResume` 装载设置，在 `onPause` 停止计时回调与动画。水平手势控制面板，面板宽度上限为屏幕的 82%。
 - 双侧面板外的点击拦截层保持透明，打开面板时不会改变背景亮度。亮度滑杆触摸期间暂停抽屉水平手势，松手后恢复。
 - `ClockFaceView` 在每次重绘时读取设置，将当前瞬间映射到选定时区，再绘制时间、公历、农历。
-- `SettingsPanel` 负责左侧时间设置、右侧外观自定义与媒体导入。背景保留系统 URI；字体复制到应用私有目录。
+- `SettingsPanel` 负责左侧时间设置、右侧外观自定义与媒体导入。图片复制到应用私有目录，视频保留系统文档 URI；字体复制到应用私有目录。
 - `ClockSettings` 集中定义键名，避免散落的字符串。
 - `UiPalette` 在 Android 12 及以上读取系统动态强调色，旧系统提供回退色。按钮、开关和滑杆使用同一颜色来源。
 
@@ -42,8 +42,8 @@ SettingsPanel ──写入──> SharedPreferences
 
 | 类型 | 读取方式 | 运行方式 |
 | --- | --- | --- |
-| 静态图片 | 文档 URI → `ImageDecoder` | `ImageView`。 |
-| GIF / 动态 WebP | 文档 URI → `AnimatedImageDrawable` | 页面可见时播放。 |
+| 静态图片 | 相册 URI → 应用私有文件 → `ImageDecoder` | `ImageView`。 |
+| GIF / 动态 WebP | 相册 URI → 应用私有文件 → `AnimatedImageDrawable` | 页面可见时播放。 |
 | 视频 | 文档 URI → `VideoView` | 静音循环；退出页面停止。 |
 | TTF / OTF | 文档 URI → 校验并复制到私有目录 | `Typeface.createFromFile`。 |
 
@@ -57,7 +57,7 @@ SettingsPanel ──写入──> SharedPreferences
 
 ## 5. 状态与权限
 
-无需互联网、相机或全盘存储权限。用户主动选中文件后，应用只保留所选背景的读取 URI 授权。字体复制进应用私有目录，无需长期访问外部文件。设置保存在应用数据中；清除应用数据会重置设置。`FLAG_KEEP_SCREEN_ON` 只作用于时钟页窗口。
+无需互联网、相机或全盘存储权限。用户主动选择图片后，应用复制图片到私有目录，避免依赖相册 URI 的短期授权；视频则保留所选文档的读取 URI 授权。字体复制进应用私有目录。设置保存在应用数据中；清除应用数据会重置设置。`FLAG_KEEP_SCREEN_ON` 只作用于时钟页窗口。
 
 ## 6. 质量关注点
 
