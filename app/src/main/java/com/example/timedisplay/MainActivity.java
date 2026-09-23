@@ -1,0 +1,510 @@
+package com.example.timedisplay;
+
+import android.app.Activity;
+import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
+import android.graphics.Color;
+import android.graphics.ImageDecoder;
+import android.graphics.Matrix;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.AnimatedImageDrawable;
+import android.graphics.drawable.Drawable;
+import android.media.MediaPlayer;
+import android.net.Uri;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.Gravity;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
+import android.view.View;
+import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.LinearLayout;
+import android.widget.ScrollView;
+import android.widget.Toast;
+import android.widget.VideoView;
+import android.content.Intent;
+
+public final class MainActivity extends Activity {
+    private static final int CLOSED = 0;
+    private static final int LEFT = 1;
+    private static final int RIGHT = 2;
+    private static final String DRAWER_STATE = "open_drawer";
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable tick = new Runnable() {
+        @Override public void run() {
+            face.update(System.currentTimeMillis());
+            handler.postDelayed(this, 1000 - System.currentTimeMillis() % 1000);
+        }
+    };
+    private FrameLayout root;
+    private ImageView image;
+    private VideoView video;
+    private ClockFaceView face;
+    private AnimatedImageDrawable animation;
+    private SettingsPanel panels;
+    private ScrollView leftPanel;
+    private ScrollView rightPanel;
+    private View scrim;
+    private View backgroundShade;
+    private LinearLayout previewControls;
+    private ScaleGestureDetector scaleDetector;
+    private boolean active;
+    private boolean previewMode;
+    private float previewScale = 1f;
+    private float previewPanX;
+    private float previewPanY;
+    private float lastTouchX;
+    private float lastTouchY;
+    private int openDrawer = CLOSED;
+    private float downX;
+    private float downY;
+    private boolean gestureConsumed;
+    private boolean drawerGestureLocked;
+
+    @Override protected void onCreate(Bundle state) {
+        super.onCreate(state);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+
+        root = new FrameLayout(this);
+        root.setBackgroundColor(Color.rgb(12, 19, 32));
+        image = new ImageView(this);
+        root.addView(image, new FrameLayout.LayoutParams(-1, -1));
+        backgroundShade = new View(this);
+        backgroundShade.setBackgroundColor(Color.BLACK);
+        backgroundShade.setAlpha(0f);
+        root.addView(backgroundShade, new FrameLayout.LayoutParams(-1, -1));
+        face = new ClockFaceView(this);
+        root.addView(face, new FrameLayout.LayoutParams(-1, -1));
+
+        scrim = new View(this);
+        scrim.setBackgroundColor(Color.TRANSPARENT);
+        scrim.setVisibility(View.GONE);
+        scrim.setOnClickListener(v -> closeDrawer());
+        root.addView(scrim, new FrameLayout.LayoutParams(-1, -1));
+
+        panels = new SettingsPanel(this);
+        leftPanel = panels.createSettingsPanel();
+        rightPanel = panels.createCustomizationPanel();
+        leftPanel.setVisibility(View.GONE);
+        rightPanel.setVisibility(View.GONE);
+        root.addView(leftPanel, new FrameLayout.LayoutParams(1, -1, Gravity.START));
+        root.addView(rightPanel, new FrameLayout.LayoutParams(1, -1, Gravity.END));
+        createPreviewControls();
+        scaleDetector = new ScaleGestureDetector(this,
+                new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+                    @Override public boolean onScale(ScaleGestureDetector detector) {
+                        if (image.getWidth() <= 0 || image.getHeight() <= 0) return false;
+                        float oldScale = previewScale;
+                        float nextScale = clamp(oldScale * detector.getScaleFactor(), 1f, 4f);
+                        float factor = nextScale / oldScale;
+                        float cx = image.getWidth() / 2f;
+                        float cy = image.getHeight() / 2f;
+                        previewPanX = (previewPanX * image.getWidth() * factor
+                                + (detector.getFocusX() - cx) * (1f - factor)) / image.getWidth();
+                        previewPanY = (previewPanY * image.getHeight() * factor
+                                + (detector.getFocusY() - cy) * (1f - factor)) / image.getHeight();
+                        previewScale = nextScale;
+                        applyBackgroundMatrix();
+                        return true;
+                    }
+                });
+        setContentView(root);
+
+        root.post(() -> {
+            int width = Math.min(dp(340), Math.round(root.getWidth() * 0.82f));
+            setPanelWidth(leftPanel, width, Gravity.START);
+            setPanelWidth(rightPanel, width, Gravity.END);
+            if (state != null) showDrawer(state.getInt(DRAWER_STATE, CLOSED), false);
+        });
+    }
+
+    @Override protected void onSaveInstanceState(Bundle outState) {
+        outState.putInt(DRAWER_STATE, openDrawer);
+        super.onSaveInstanceState(outState);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        active = true;
+        panels.refreshAccent();
+        int accent = UiPalette.accent(this);
+        for (int i = 0; i < previewControls.getChildCount(); i++) {
+            View child = previewControls.getChildAt(i);
+            if (child.getBackground() instanceof GradientDrawable) {
+                ((GradientDrawable) child.getBackground()).setColor(UiPalette.withAlpha(accent, 210));
+            }
+        }
+        applyOrientation();
+        loadBackground(ClockSettings.of(this));
+        handler.removeCallbacks(tick);
+        tick.run();
+    }
+
+    @Override protected void onPause() {
+        active = false;
+        drawerGestureLocked = false;
+        handler.removeCallbacks(tick);
+        if (animation != null) animation.stop();
+        if (video != null) video.stopPlayback();
+        super.onPause();
+    }
+
+    @Override public void onBackPressed() {
+        if (previewMode) finishBackgroundPreview(false);
+        else if (openDrawer != CLOSED) closeDrawer();
+        else super.onBackPressed();
+    }
+
+    @Override public boolean dispatchTouchEvent(MotionEvent event) {
+        if (previewMode) return super.dispatchTouchEvent(event);
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            downX = event.getX();
+            downY = event.getY();
+            gestureConsumed = false;
+        } else if (drawerGestureLocked) {
+            return super.dispatchTouchEvent(event);
+        } else if (action == MotionEvent.ACTION_MOVE && !gestureConsumed) {
+            float dx = event.getX() - downX;
+            float dy = event.getY() - downY;
+            if (Math.abs(dx) > dp(64) && Math.abs(dx) > Math.abs(dy) * 1.3f) {
+                if (openDrawer == CLOSED) {
+                    showDrawer(dx > 0 ? LEFT : RIGHT, true);
+                    gestureConsumed = true;
+                } else if ((openDrawer == LEFT && dx < 0) || (openDrawer == RIGHT && dx > 0)) {
+                    closeDrawer();
+                    gestureConsumed = true;
+                }
+                if (gestureConsumed) return true;
+            }
+        } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            if (gestureConsumed) {
+                gestureConsumed = false;
+                return true;
+            }
+        }
+        return gestureConsumed || super.dispatchTouchEvent(event);
+    }
+
+    void setDrawerGestureLocked(boolean locked) {
+        drawerGestureLocked = locked;
+    }
+
+    void onSettingChanged(String key) {
+        face.update(System.currentTimeMillis());
+        if (ClockSettings.ORIENTATION.equals(key)) applyOrientation();
+        if (ClockSettings.PANEL_TRANSPARENCY.equals(key)) updatePanelTransparency();
+        if (ClockSettings.BACKGROUND_DIM.equals(key)) updateBackgroundShade(ClockSettings.of(this));
+        if (ClockSettings.BACKGROUND_URI.equals(key) || ClockSettings.BACKGROUND_MODE.equals(key)
+                || ClockSettings.BACKGROUND_TYPE.equals(key)) loadBackground(ClockSettings.of(this));
+    }
+
+    @Override protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        panels.onActivityResult(request, result, data);
+    }
+
+    private void applyOrientation() {
+        String value = ClockSettings.of(this).getString(ClockSettings.ORIENTATION, "auto");
+        int requested = "portrait".equals(value) ? ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+                : "landscape".equals(value) ? ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+                : ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED;
+        if (getRequestedOrientation() != requested) setRequestedOrientation(requested);
+    }
+
+    private void setPanelWidth(ScrollView panel, int width, int gravity) {
+        panel.setLayoutParams(new FrameLayout.LayoutParams(width, -1, gravity));
+    }
+
+    private void showDrawer(int side, boolean animate) {
+        if (side != LEFT && side != RIGHT) return;
+        ScrollView panel = side == LEFT ? leftPanel : rightPanel;
+        ScrollView opposite = side == LEFT ? rightPanel : leftPanel;
+        opposite.animate().cancel();
+        opposite.setVisibility(View.GONE);
+        scrim.setVisibility(View.VISIBLE);
+        openDrawer = side;
+        panel.animate().cancel();
+        panel.setVisibility(View.VISIBLE);
+        float outside = side == LEFT ? -panel.getLayoutParams().width : panel.getLayoutParams().width;
+        panel.setTranslationX(animate ? outside : 0);
+        if (animate) panel.animate().translationX(0).setDuration(220).start();
+    }
+
+    private void closeDrawer() {
+        if (openDrawer == CLOSED) return;
+        int closing = openDrawer;
+        ScrollView panel = closing == LEFT ? leftPanel : rightPanel;
+        openDrawer = CLOSED;
+        panel.animate().cancel();
+        float outside = closing == LEFT ? -panel.getLayoutParams().width : panel.getLayoutParams().width;
+        panel.animate().translationX(outside).setDuration(220).withEndAction(() -> {
+            panel.setVisibility(View.GONE);
+            if (openDrawer == CLOSED) {
+                scrim.setVisibility(View.GONE);
+            }
+        }).start();
+    }
+
+    private void updatePanelTransparency() {
+        int transparency = Math.round(clamp(ClockSettings.of(this)
+                .getInt(ClockSettings.PANEL_TRANSPARENCY, 5), 0, 80));
+        int color = Color.argb(Math.round(255 * (100 - transparency) / 100f), 20, 29, 44);
+        leftPanel.setBackgroundColor(color);
+        rightPanel.setBackgroundColor(color);
+    }
+
+    private void createPreviewControls() {
+        previewControls = new LinearLayout(this);
+        previewControls.setOrientation(LinearLayout.HORIZONTAL);
+        previewControls.setGravity(Gravity.CENTER);
+        previewControls.setVisibility(View.GONE);
+        Button reset = previewButton("重置");
+        Button save = previewButton("保存");
+        Button cancel = previewButton("取消");
+        reset.setOnClickListener(v -> {
+            previewScale = 1f;
+            previewPanX = 0f;
+            previewPanY = 0f;
+            applyBackgroundMatrix();
+        });
+        save.setOnClickListener(v -> finishBackgroundPreview(true));
+        cancel.setOnClickListener(v -> finishBackgroundPreview(false));
+        previewControls.addView(reset, previewButtonParams());
+        previewControls.addView(save, previewButtonParams());
+        previewControls.addView(cancel, previewButtonParams());
+        FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(-2, -2,
+                Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        params.bottomMargin = dp(28);
+        root.addView(previewControls, params);
+    }
+
+    private Button previewButton(String title) {
+        Button button = new Button(this);
+        button.setText(title);
+        button.setTextSize(14);
+        button.setTextColor(Color.WHITE);
+        button.setAllCaps(false);
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setPadding(0, 0, 0, 0);
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(UiPalette.withAlpha(UiPalette.accent(this), 210));
+        background.setCornerRadius(dp(10));
+        button.setBackground(background);
+        button.setBackgroundTintList(null);
+        return button;
+    }
+
+    private LinearLayout.LayoutParams previewButtonParams() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(68), dp(40));
+        params.setMargins(dp(5), 0, dp(5), 0);
+        return params;
+    }
+
+    void startBackgroundPreview() {
+        SharedPreferences prefs = ClockSettings.of(this);
+        if (prefs.getString(ClockSettings.BACKGROUND_URI, "").isEmpty()) {
+            Toast.makeText(this, "请先选择图片背景", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if ("video".equals(prefs.getString(ClockSettings.BACKGROUND_TYPE, "image"))) {
+            Toast.makeText(this, "视频背景暂不支持位置调整", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (image.getDrawable() == null || image.getWidth() == 0) {
+            Toast.makeText(this, "图片尚未加载，请稍后重试", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        leftPanel.animate().cancel();
+        rightPanel.animate().cancel();
+        leftPanel.setVisibility(View.GONE);
+        rightPanel.setVisibility(View.GONE);
+        scrim.setVisibility(View.GONE);
+        openDrawer = CLOSED;
+        previewScale = prefs.getFloat(ClockSettings.BACKGROUND_SCALE, 1f);
+        previewPanX = prefs.getFloat(ClockSettings.BACKGROUND_PAN_X, 0f);
+        previewPanY = prefs.getFloat(ClockSettings.BACKGROUND_PAN_Y, 0f);
+        previewMode = true;
+        face.setVisibility(View.GONE);
+        previewControls.setVisibility(View.VISIBLE);
+        image.setOnTouchListener((view, event) -> onPreviewTouch(event));
+        image.setClickable(true);
+        applyBackgroundMatrix();
+    }
+
+    private void finishBackgroundPreview(boolean save) {
+        if (!previewMode) return;
+        SharedPreferences prefs = ClockSettings.of(this);
+        if (save) {
+            prefs.edit().putFloat(ClockSettings.BACKGROUND_SCALE, previewScale)
+                    .putFloat(ClockSettings.BACKGROUND_PAN_X, previewPanX)
+                    .putFloat(ClockSettings.BACKGROUND_PAN_Y, previewPanY).apply();
+        }
+        previewMode = false;
+        image.setOnTouchListener(null);
+        image.setClickable(false);
+        previewControls.setVisibility(View.GONE);
+        face.setVisibility(View.VISIBLE);
+        applyBackgroundMatrix();
+        showDrawer(RIGHT, false);
+    }
+
+    private boolean onPreviewTouch(MotionEvent event) {
+        scaleDetector.onTouchEvent(event);
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                lastTouchX = event.getX();
+                lastTouchY = event.getY();
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (event.getPointerCount() == 1 && !scaleDetector.isInProgress()) {
+                    previewPanX += (event.getX() - lastTouchX) / image.getWidth();
+                    previewPanY += (event.getY() - lastTouchY) / image.getHeight();
+                    applyBackgroundMatrix();
+                    lastTouchX = event.getX();
+                    lastTouchY = event.getY();
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                int remaining = event.getActionIndex() == 0 ? 1 : 0;
+                lastTouchX = event.getX(remaining);
+                lastTouchY = event.getY(remaining);
+                break;
+            default:
+                break;
+        }
+        return true;
+    }
+
+    private void applyBackgroundMatrix() {
+        Drawable drawable = image.getDrawable();
+        int width = image.getWidth();
+        int height = image.getHeight();
+        if (drawable == null || width <= 0 || height <= 0) return;
+        boolean stretch = "stretch".equals(ClockSettings.of(this)
+                .getString(ClockSettings.BACKGROUND_MODE, "fill"));
+        int sourceWidth = drawable.getIntrinsicWidth();
+        int sourceHeight = drawable.getIntrinsicHeight();
+        if (sourceWidth <= 0 || sourceHeight <= 0) {
+            image.setScaleType(stretch ? ImageView.ScaleType.FIT_XY : ImageView.ScaleType.CENTER_CROP);
+            return;
+        }
+        SharedPreferences prefs = ClockSettings.of(this);
+        float zoom = clamp(previewMode ? previewScale
+                : prefs.getFloat(ClockSettings.BACKGROUND_SCALE, 1f), 1f, 4f);
+        float panX = previewMode ? previewPanX : prefs.getFloat(ClockSettings.BACKGROUND_PAN_X, 0f);
+        float panY = previewMode ? previewPanY : prefs.getFloat(ClockSettings.BACKGROUND_PAN_Y, 0f);
+        float scaleX = width / (float) sourceWidth;
+        float scaleY = height / (float) sourceHeight;
+        if (!stretch) scaleX = scaleY = Math.max(scaleX, scaleY);
+        scaleX *= zoom;
+        scaleY *= zoom;
+        float displayedWidth = sourceWidth * scaleX;
+        float displayedHeight = sourceHeight * scaleY;
+        float offsetX = clamp(panX * width, -Math.max(0f, (displayedWidth - width) / 2f),
+                Math.max(0f, (displayedWidth - width) / 2f));
+        float offsetY = clamp(panY * height, -Math.max(0f, (displayedHeight - height) / 2f),
+                Math.max(0f, (displayedHeight - height) / 2f));
+        if (previewMode) {
+            previewPanX = offsetX / width;
+            previewPanY = offsetY / height;
+        }
+        Matrix matrix = new Matrix();
+        matrix.setScale(scaleX, scaleY);
+        matrix.postTranslate((width - displayedWidth) / 2f + offsetX,
+                (height - displayedHeight) / 2f + offsetY);
+        image.setScaleType(ImageView.ScaleType.MATRIX);
+        image.setImageMatrix(matrix);
+    }
+
+    private static float clamp(float value, float minimum, float maximum) {
+        return Math.max(minimum, Math.min(maximum, value));
+    }
+
+    private void loadBackground(SharedPreferences prefs) {
+        if (video != null) {
+            video.stopPlayback();
+            root.removeView(video);
+            video = null;
+        }
+        if (animation != null) {
+            animation.stop();
+            animation = null;
+        }
+        image.setImageDrawable(null);
+        updateBackgroundShade(prefs);
+        boolean stretch = "stretch".equals(prefs.getString(ClockSettings.BACKGROUND_MODE, "fill"));
+        String value = prefs.getString(ClockSettings.BACKGROUND_URI, "");
+        if (value.isEmpty()) return;
+        Uri uri = Uri.parse(value);
+        try {
+            if ("video".equals(prefs.getString(ClockSettings.BACKGROUND_TYPE, "image"))) {
+                video = new VideoView(this) {
+                    @Override protected void onMeasure(int widthSpec, int heightSpec) {
+                        setMeasuredDimension(MeasureSpec.getSize(widthSpec), MeasureSpec.getSize(heightSpec));
+                    }
+                };
+                VideoView current = video;
+                root.addView(current, 1, new FrameLayout.LayoutParams(-1, -1, Gravity.CENTER));
+                current.setVideoURI(uri);
+                current.setOnPreparedListener(player -> {
+                    if (video != current || !active) return;
+                    player.setLooping(true);
+                    player.setVolume(0, 0);
+                    root.post(() -> sizeVideo(current, player, stretch));
+                    current.start();
+                });
+                current.setOnErrorListener((player, what, extra) -> {
+                    backgroundShade.setAlpha(0f);
+                    Toast.makeText(this, "视频无法播放，请在右侧面板更换背景", Toast.LENGTH_LONG).show();
+                    return true;
+                });
+            } else {
+                Drawable drawable = ImageDecoder.decodeDrawable(ImageDecoder.createSource(getContentResolver(), uri));
+                image.setImageDrawable(drawable);
+                image.post(this::applyBackgroundMatrix);
+                if (drawable instanceof AnimatedImageDrawable) {
+                    animation = (AnimatedImageDrawable) drawable;
+                    animation.setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
+                    animation.start();
+                }
+            }
+        } catch (Exception error) {
+            backgroundShade.setAlpha(0f);
+            Toast.makeText(this, "背景文件无法打开，请在右侧面板重新选择", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void updateBackgroundShade(SharedPreferences prefs) {
+        boolean hasBackground = !prefs.getString(ClockSettings.BACKGROUND_URI, "").isEmpty();
+        int dim = Math.max(0, Math.min(70, prefs.getInt(ClockSettings.BACKGROUND_DIM, 0)));
+        backgroundShade.setAlpha(hasBackground ? dim / 100f : 0f);
+    }
+
+    private void sizeVideo(VideoView current, MediaPlayer player, boolean stretch) {
+        if (video != current || root.getWidth() == 0 || root.getHeight() == 0) return;
+        int width = root.getWidth();
+        int height = root.getHeight();
+        if (!stretch && player.getVideoWidth() > 0 && player.getVideoHeight() > 0) {
+            float scale = Math.max(width / (float) player.getVideoWidth(),
+                    height / (float) player.getVideoHeight());
+            width = Math.round(player.getVideoWidth() * scale);
+            height = Math.round(player.getVideoHeight() * scale);
+        }
+        current.setLayoutParams(new FrameLayout.LayoutParams(width, height, Gravity.CENTER));
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+}

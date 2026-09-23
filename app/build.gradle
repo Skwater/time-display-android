@@ -1,0 +1,42 @@
+plugins {
+    id 'com.android.application'
+}
+
+def fixedDebugKeystore = file('signing/time-display-debug.keystore')
+
+android {
+    namespace 'com.example.timedisplay'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.example.timedisplay'
+        minSdk 28
+        targetSdk 35
+        versionCode 5
+        versionName '0.4.0'
+    }
+
+    signingConfigs {
+        if (fixedDebugKeystore.exists()) {
+            debug {
+                storeFile fixedDebugKeystore
+                storePassword 'android'
+                keyAlias 'androiddebugkey'
+                keyPassword 'android'
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (fixedDebugKeystore.exists()) {
+                signingConfig signingConfigs.debug
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}

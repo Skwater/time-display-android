@@ -1,0 +1,69 @@
+# 技术设计
+
+## 1. 技术选型
+
+| 项 | 选择 | 理由 |
+| --- | --- | --- |
+| UI | 原生 Android View，Java | 不依赖第三方 UI 库，适合单屏时钟。 |
+| 最低系统 | Android 9 / API 28 | 可直接使用 `ImageDecoder` 播放 GIF / 动态 WebP。 |
+| 构建 | AGP 8.13.2、Gradle 8.13、JDK 17、compileSdk 36 | 采用兼容组合。 |
+| 日期时间 | `java.time`、IANA `ZoneId` | 用系统时区规则处理夏令时。 |
+| 中国农历 | Android ICU `ChineseCalendar` | 系统 API，无需外部数据表。 |
+| 本地数据 | `SharedPreferences` | 设置项少且无需数据库查询。 |
+| 媒体选择 | `ACTION_OPEN_DOCUMENT` | 使用系统文件选择器和持久读取授权。 |
+
+Android 官方资料：[AGP 8.13 兼容要求](https://developer.android.com/build/releases/agp-8-13-0-release-notes)、[ChineseCalendar API](https://developer.android.com/reference/android/icu/util/ChineseCalendar)、[ImageDecoder API](https://developer.android.com/reference/android/graphics/ImageDecoder)、[ACTION_OPEN_DOCUMENT](https://developer.android.com/reference/android/content/Intent#ACTION_OPEN_DOCUMENT)。
+
+## 2. 模块职责
+
+```text
+SettingsPanel ──写入──> SharedPreferences
+       │                         │
+       └──系统文件选择器           ├──> MainActivity：方向和背景
+                                 └──> ClockFaceView：时间、日期、字体
+
+设备系统时钟 ──每秒读取──> ClockFaceView
+```
+
+- `MainActivity` 创建背景层、可调暗度层、时钟层和双侧抽屉；暗度默认为 0。在 `onResume` 装载设置，在 `onPause` 停止计时回调与动画。水平手势控制面板，面板宽度上限为屏幕的 82%。
+- 双侧面板外的点击拦截层保持透明，打开面板时不会改变背景亮度。亮度滑杆触摸期间暂停抽屉水平手势，松手后恢复。
+- `ClockFaceView` 在每次重绘时读取设置，将当前瞬间映射到选定时区，再绘制时间、公历、农历。
+- `SettingsPanel` 负责左侧时间设置、右侧外观自定义与媒体导入。背景保留系统 URI；字体复制到应用私有目录。
+- `ClockSettings` 集中定义键名，避免散落的字符串。
+- `UiPalette` 在 Android 12 及以上读取系统动态强调色，旧系统提供回退色。按钮、开关和滑杆使用同一颜色来源。
+
+## 3. 时间正确性
+
+应用每次刷新都调用 `System.currentTimeMillis()`，并将下一次刷新安排在下一个整秒附近。这样从后台返回、系统手动改时、网络自动校时、跨日和夏令时切换时，都重新按当前时刻计算；不使用“上一次时间 + 1 秒”累加。UI 主线程仅在时钟页活跃时更新。
+
+公历使用 `Instant → ZoneId → ZonedDateTime`。农历使用同一个毫秒时间戳和所选时区生成 `ChineseCalendar`。`ChineseCalendar` 自身的天文计算遵循 Android ICU 的中国历法规则，不能将其他历法来源与此混用。
+
+## 4. 背景与字体
+
+| 类型 | 读取方式 | 运行方式 |
+| --- | --- | --- |
+| 静态图片 | 文档 URI → `ImageDecoder` | `ImageView`。 |
+| GIF / 动态 WebP | 文档 URI → `AnimatedImageDrawable` | 页面可见时播放。 |
+| 视频 | 文档 URI → `VideoView` | 静音循环；退出页面停止。 |
+| TTF / OTF | 文档 URI → 校验并复制到私有目录 | `Typeface.createFromFile`。 |
+
+背景适配对图片使用 `CENTER_CROP` 或 `FIT_XY`。视频在解码信息可用后计算容器尺寸：填充取覆盖屏幕所需的较大缩放比；拉伸使用容器宽高。不同设备的 `VideoView` / `SurfaceView` 渲染行为仍需真机确认。
+
+背景亮度通过背景与文字之间的黑色视图控制，默认透明；滑杆将暗度设为 0%–70%，对应背景亮度 100%–30%。文字阴影和加粗分别由独立的布尔设置控制。
+
+图片背景改为 `ImageView.ScaleType.MATRIX`：先按填充或拉伸计算基础矩阵，再叠加用户缩放与按屏幕宽高归一化的平移。平移被限制在图片边缘以内。预览触摸由 `ScaleGestureDetector` 和单指位移处理；保存时写入缩放及两个平移值，取消时恢复持久化值。视频保持 `VideoView` 的原有适配方式，不进入手势预览。
+
+侧栏透明度只修改两个面板的背景颜色 alpha；文字及面板外的背景保持原值。时区选择项的前缀在创建面板时依据当前时区规则与当前时刻计算，因此包含夏令时偏移。
+
+## 5. 状态与权限
+
+无需互联网、相机或全盘存储权限。用户主动选中文件后，应用只保留所选背景的读取 URI 授权。字体复制进应用私有目录，无需长期访问外部文件。设置保存在应用数据中；清除应用数据会重置设置。`FLAG_KEEP_SCREEN_ON` 只作用于时钟页窗口。
+
+## 6. 质量关注点
+
+- **可读性**：暗度默认 0%，文字阴影可关闭；极亮或高频动图可用背景亮度滑杆调节。
+- **签名**：Debug APK 使用 `app/signing/time-display-debug.keystore`，0.2.0、0.3.0 与 0.3.1 的证书指纹已核对一致。该密钥仅用于测试，不作为发布签名。
+- **大图内存**：当前实现直接解码原图，超大图可能占用大量内存；发布前应加入按屏幕尺寸采样。
+- **功耗**：秒级更新、常亮和视频播放持续耗电；可关闭秒数，但首版刷新调度仍为每秒。后续可在秒数关闭时改为分钟级刷新。
+- **系统差异**：背景视频编码、字体格式和文件提供方的持久授权需覆盖不同设备测试。
+- **备份**：系统备份可能恢复设置字符串但不能恢复外部文档授权；恢复后应回退默认背景。
