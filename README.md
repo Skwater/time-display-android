@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-已创建可导入 Android Studio 的原生 Java 项目。当前版本为 0.9.5，Debug APK 位于 `releases/time-display-0.9.5-debug.apk`。构建和签名已核对；详见[测试计划](docs/test-plan.md)。
+已创建可导入 Android Studio 的原生 Java 项目。当前版本为 0.9.5。构建和签名已核对；项目文档（产品需求、技术设计、测试计划）保留在本地 `docs/`，不随本仓库上传。
 
 ## 运行
 
@@ -62,7 +62,7 @@
 
 ## Git 版本管理
 
-项目使用 `main` 分支记录已完成的版本。每次功能修改提交代码与文档；构建出的版本化 APK 保存在 `releases/` 并随版本提交。构建缓存、下载的工具和本机签名密钥由 `.gitignore` 排除。推送到远端前，请单独安全备份 `app/signing/time-display-debug.keystore`，以便在其他机器上继续使用相同签名。
+项目使用 `main` 分支记录已完成的版本。每次功能修改提交代码与更新记录；构建出的版本化 APK 仅保留在本地 `releases/`，不上传 GitHub。构建缓存、下载的工具、签名密钥和 `releases/` 均由 `.gitignore` 排除。推送到远端前，请单独安全备份 `app/signing/time-display-debug.keystore`，以便在其他机器上继续使用相同签名。
 
 ## 工作区规范
 
