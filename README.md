@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-已创建可导入 Android Studio 的原生 Java 项目。0.4.2 Debug APK 位于 `releases/time-display-0.4.2-debug.apk`，构建原件位于 `app/build/outputs/apk/debug/app-debug.apk`。构建与签名校验已通过；尚未完成设备实测，验收步骤见 [测试计划](docs/test-plan.md)。
+已创建可导入 Android Studio 的原生 Java 项目。当前源码版本为 0.4.3，尚未打包；最近的 Debug APK 为 `releases/time-display-0.4.2-debug.apk`。设备验收尚未完成，步骤见 [测试计划](docs/test-plan.md)。
 
 ## 运行
 
@@ -23,6 +23,8 @@
 0.4.1 更新：将背景导入拆为并排的图片和视频按钮；图片优先调用系统相册选图界面，视频沿用文件选择器。
 
 0.4.2 更新：字体菜单首项改为设备当前默认字体；原有轻体无衬线、系统衬线、系统等宽及自定义字体依次排列。已明确选择轻体无衬线的用户升级后仍保留该选择。
+
+0.4.3 更新：字体菜单首项文案简化为“默认字体”。仅更新源码，暂未打包 APK。
 
 ## 文档
 
