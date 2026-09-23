@@ -259,6 +259,8 @@ final class SettingsPanel {
         section(t("字体", "Font"));
         createFontMenu();
         createFontSizeControls();
+        button(t("预览并调整文字位置", "Preview and position text"),
+                v -> host.startTextPositionPreview());
         toggle(t("文字加粗", "Bold text"), ClockSettings.FONT_BOLD, false);
         toggle(t("文字阴影", "Text shadow"), ClockSettings.TEXT_SHADOW, true);
         createFontColorControls();

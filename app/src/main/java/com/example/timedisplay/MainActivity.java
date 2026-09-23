@@ -67,9 +67,12 @@ public final class MainActivity extends Activity {
     private ScaleGestureDetector scaleDetector;
     private boolean active;
     private boolean previewMode;
+    private boolean textPreviewMode;
     private float previewScale = 1f;
     private float previewPanX;
     private float previewPanY;
+    private float previewTextPanX;
+    private float previewTextPanY;
     private float lastTouchX;
     private float lastTouchY;
     private int openDrawer = CLOSED;
@@ -223,14 +226,15 @@ public final class MainActivity extends Activity {
     }
 
     @Override public void onBackPressed() {
-        if (previewMode) finishBackgroundPreview(false);
+        if (textPreviewMode) finishTextPositionPreview(false);
+        else if (previewMode) finishBackgroundPreview(false);
         else if (openDrawer == RIGHT && panels.onBackPressed()) return;
         else if (openDrawer != CLOSED) closeDrawer();
         else super.onBackPressed();
     }
 
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
-        if (previewMode) return super.dispatchTouchEvent(event);
+        if (previewMode || textPreviewMode) return super.dispatchTouchEvent(event);
         int action = event.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN) {
             downX = event.getX();
@@ -453,13 +457,25 @@ public final class MainActivity extends Activity {
         Button save = previewButton(L10n.text(this, "保存", "Save"));
         Button cancel = previewButton(L10n.text(this, "取消", "Cancel"));
         reset.setOnClickListener(v -> {
-            previewScale = 1f;
-            previewPanX = 0f;
-            previewPanY = 0f;
-            applyBackgroundMatrix();
+            if (textPreviewMode) {
+                previewTextPanX = 0f;
+                previewTextPanY = 0f;
+                face.setPreviewTextPosition(0f, 0f);
+            } else {
+                previewScale = 1f;
+                previewPanX = 0f;
+                previewPanY = 0f;
+                applyBackgroundMatrix();
+            }
         });
-        save.setOnClickListener(v -> finishBackgroundPreview(true));
-        cancel.setOnClickListener(v -> finishBackgroundPreview(false));
+        save.setOnClickListener(v -> {
+            if (textPreviewMode) finishTextPositionPreview(true);
+            else finishBackgroundPreview(true);
+        });
+        cancel.setOnClickListener(v -> {
+            if (textPreviewMode) finishTextPositionPreview(false);
+            else finishBackgroundPreview(false);
+        });
         previewControls.addView(reset, previewButtonParams());
         previewControls.addView(save, previewButtonParams());
         previewControls.addView(cancel, previewButtonParams());
@@ -513,12 +529,7 @@ public final class MainActivity extends Activity {
             Toast.makeText(this, L10n.text(this, "图片尚未加载，请稍后重试", "Image is still loading; try again"), Toast.LENGTH_SHORT).show();
             return;
         }
-        leftPanel.animate().cancel();
-        rightPanel.animate().cancel();
-        leftPanel.setVisibility(View.GONE);
-        rightPanel.setVisibility(View.GONE);
-        scrim.setVisibility(View.GONE);
-        openDrawer = CLOSED;
+        hideDrawersForPreview();
         previewScale = prefs.getFloat(ClockSettings.BACKGROUND_SCALE, 1f);
         previewPanX = prefs.getFloat(ClockSettings.BACKGROUND_PAN_X, 0f);
         previewPanY = prefs.getFloat(ClockSettings.BACKGROUND_PAN_Y, 0f);
@@ -528,6 +539,69 @@ public final class MainActivity extends Activity {
         image.setOnTouchListener((view, event) -> onPreviewTouch(event));
         image.setClickable(true);
         applyBackgroundMatrix();
+    }
+
+    void startTextPositionPreview() {
+        if (previewMode || textPreviewMode) return;
+        hideDrawersForPreview();
+        SharedPreferences prefs = ClockSettings.of(this);
+        previewTextPanX = prefs.getFloat(ClockSettings.TEXT_PAN_X, 0f);
+        previewTextPanY = prefs.getFloat(ClockSettings.TEXT_PAN_Y, 0f);
+        textPreviewMode = true;
+        face.setTextPositionPreview(true, previewTextPanX, previewTextPanY);
+        previewControls.setVisibility(View.VISIBLE);
+        face.setOnTouchListener((view, event) -> onTextPreviewTouch(event));
+        face.setClickable(true);
+    }
+
+    private void hideDrawersForPreview() {
+        leftPanel.animate().cancel();
+        rightPanel.animate().cancel();
+        leftPanel.setVisibility(View.GONE);
+        rightPanel.setVisibility(View.GONE);
+        scrim.setVisibility(View.GONE);
+        openDrawer = CLOSED;
+    }
+
+    private void finishTextPositionPreview(boolean save) {
+        if (!textPreviewMode) return;
+        if (save) ClockSettings.of(this).edit()
+                .putFloat(ClockSettings.TEXT_PAN_X, face.previewTextPanX())
+                .putFloat(ClockSettings.TEXT_PAN_Y, face.previewTextPanY()).apply();
+        textPreviewMode = false;
+        face.setOnTouchListener(null);
+        face.setClickable(false);
+        face.setTextPositionPreview(false, 0f, 0f);
+        previewControls.setVisibility(View.GONE);
+        showDrawer(RIGHT, false);
+    }
+
+    private boolean onTextPreviewTouch(MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                lastTouchX = event.getX();
+                lastTouchY = event.getY();
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (event.getPointerCount() == 1 && face.getWidth() > 0 && face.getHeight() > 0) {
+                    previewTextPanX += (event.getX() - lastTouchX) / face.getWidth();
+                    previewTextPanY += (event.getY() - lastTouchY) / face.getHeight();
+                    face.setPreviewTextPosition(previewTextPanX, previewTextPanY);
+                    previewTextPanX = face.previewTextPanX();
+                    previewTextPanY = face.previewTextPanY();
+                    lastTouchX = event.getX();
+                    lastTouchY = event.getY();
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                int remaining = event.getActionIndex() == 0 ? 1 : 0;
+                lastTouchX = event.getX(remaining);
+                lastTouchY = event.getY(remaining);
+                break;
+            default:
+                break;
+        }
+        return true;
     }
 
     private void finishBackgroundPreview(boolean save) {
@@ -671,11 +745,7 @@ public final class MainActivity extends Activity {
 
     private void sampleStaticBackground(ImageDecoder decoder, ImageDecoder.ImageInfo info,
                                         ImageDecoder.Source source) {
-        try {
-            java.lang.reflect.Method m = decoder.getClass().getMethod("isAnimated");
-            if ((Boolean) m.invoke(decoder)) return;
-        } catch (Exception ignored) {
-        }
+        if (info.isAnimated()) return;
         int maxEdge = Math.max(root.getWidth(), root.getHeight());
         if (maxEdge <= 0) {
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();

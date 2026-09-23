@@ -41,6 +41,8 @@ final class ClockSettings {
     static final String FONT_FILE = "font_file";
     static final String FONT_LIBRARY = "font_library";
     static final String FONT_SIZE_PERCENT = "font_size_percent";
+    static final String TEXT_PAN_X = "text_pan_x";
+    static final String TEXT_PAN_Y = "text_pan_y";
     static final String FONT_OPACITY = "font_opacity";
     static final String FONT_INTENSITY = "font_intensity";
     static final String FONT_HUE = "font_hue";

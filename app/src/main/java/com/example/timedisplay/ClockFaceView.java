@@ -24,6 +24,11 @@ final class ClockFaceView extends View {
 
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private long now = System.currentTimeMillis();
+    private boolean textPositionPreview;
+    private float previewPanX;
+    private float previewPanY;
+    private float maxPanX;
+    private float maxPanY;
 
     ClockFaceView(Context context) {
         super(context);
@@ -34,6 +39,22 @@ final class ClockFaceView extends View {
         now = millis;
         invalidate();
     }
+
+    void setTextPositionPreview(boolean enabled, float x, float y) {
+        textPositionPreview = enabled;
+        previewPanX = x;
+        previewPanY = y;
+        invalidate();
+    }
+
+    void setPreviewTextPosition(float x, float y) {
+        previewPanX = Math.max(-maxPanX, Math.min(maxPanX, x));
+        previewPanY = Math.max(-maxPanY, Math.min(maxPanY, y));
+        invalidate();
+    }
+
+    float previewTextPanX() { return previewPanX; }
+    float previewTextPanY() { return previewPanY; }
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
@@ -99,19 +120,41 @@ final class ClockFaceView extends View {
             gap *= layoutFit;
             blockHeight = timeSize + gap + details.size() * lineHeight;
         }
-        float y = (getHeight() - blockHeight) / 2f + timeSize;
+        float[] detailSizes = new float[details.size()];
         paint.setTextSize(timeSize);
-        canvas.drawText(time, getWidth() / 2f, y, paint);
-        paint.setTextSize(detailSize);
-        for (String detail : details) {
-            y += lineHeight;
+        float widest = paint.measureText(time);
+        for (int i = 0; i < details.size(); i++) {
+            String detail = details.get(i);
+            paint.setTextSize(detailSize);
             float minimumDetailSize = dp(6) * layoutFit;
             while (paint.measureText(detail) > maxWidth && paint.getTextSize() > minimumDetailSize) {
                 paint.setTextSize(Math.max(minimumDetailSize, paint.getTextSize() - dp(1) * fontScale));
             }
-            canvas.drawText(detail, getWidth() / 2f, y, paint);
-            paint.setTextSize(detailSize);
+            detailSizes[i] = paint.getTextSize();
+            widest = Math.max(widest, paint.measureText(detail));
         }
+        maxPanX = Math.max(0f, (getWidth() - widest) / 2f - dp(16)) / Math.max(1, getWidth());
+        maxPanY = Math.max(0f, (getHeight() - blockHeight) / 2f - dp(12)) / Math.max(1, getHeight());
+        float savedX = textPositionPreview ? previewPanX : prefs.getFloat(ClockSettings.TEXT_PAN_X, 0f);
+        float savedY = textPositionPreview ? previewPanY : prefs.getFloat(ClockSettings.TEXT_PAN_Y, 0f);
+        float panX = Math.max(-maxPanX, Math.min(maxPanX, savedX));
+        float panY = Math.max(-maxPanY, Math.min(maxPanY, savedY));
+        if (textPositionPreview) {
+            previewPanX = panX;
+            previewPanY = panY;
+        }
+        int restore = canvas.save();
+        canvas.translate(panX * getWidth(), panY * getHeight());
+        float y = (getHeight() - blockHeight) / 2f + timeSize;
+        paint.setTextSize(timeSize);
+        canvas.drawText(time, getWidth() / 2f, y, paint);
+        for (int i = 0; i < details.size(); i++) {
+            y += lineHeight;
+            paint.setTextSize(detailSizes[i]);
+            String detail = details.get(i);
+            canvas.drawText(detail, getWidth() / 2f, y, paint);
+        }
+        canvas.restoreToCount(restore);
         String separator = english ? ", " : "，";
         setContentDescription(time + separator + String.join(separator, details));
     }
