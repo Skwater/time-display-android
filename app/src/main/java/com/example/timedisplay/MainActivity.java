@@ -45,7 +45,10 @@ public final class MainActivity extends Activity {
     private final Runnable tick = new Runnable() {
         @Override public void run() {
             face.update(System.currentTimeMillis());
-            handler.postDelayed(this, 1000 - System.currentTimeMillis() % 1000);
+            long now = System.currentTimeMillis();
+            boolean seconds = ClockSettings.of(MainActivity.this)
+                    .getBoolean(ClockSettings.SHOW_SECONDS, true);
+            handler.postDelayed(this, seconds ? 1000 - now % 1000 : 60000 - now % 60000);
         }
     };
     private FrameLayout root;
@@ -267,6 +270,10 @@ public final class MainActivity extends Activity {
             return;
         }
         face.update(System.currentTimeMillis());
+        if (ClockSettings.SHOW_SECONDS.equals(key)) {
+            handler.removeCallbacks(tick);
+            tick.run();
+        }
         if (ClockSettings.ORIENTATION.equals(key)) applyOrientation();
         if (ClockSettings.PANEL_TRANSPARENCY.equals(key)) updatePanelTransparency();
         if (ClockSettings.DEFAULT_BACKGROUND_OPACITY.equals(key)
@@ -662,6 +669,27 @@ public final class MainActivity extends Activity {
                 prefs.getString(ClockSettings.BACKGROUND_MODE, "fill"));
     }
 
+    private void sampleStaticBackground(ImageDecoder decoder, ImageDecoder.ImageInfo info,
+                                        ImageDecoder.Source source) {
+        try {
+            java.lang.reflect.Method m = decoder.getClass().getMethod("isAnimated");
+            if ((Boolean) m.invoke(decoder)) return;
+        } catch (Exception ignored) {
+        }
+        int maxEdge = Math.max(root.getWidth(), root.getHeight());
+        if (maxEdge <= 0) {
+            android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
+            maxEdge = Math.max(metrics.widthPixels, metrics.heightPixels);
+        }
+        int width = info.getSize().getWidth();
+        int height = info.getSize().getHeight();
+        int sample = 1;
+        while (sample < 8 && (width / (sample * 2) >= maxEdge || height / (sample * 2) >= maxEdge)) {
+            sample *= 2;
+        }
+        if (sample > 1) decoder.setTargetSampleSize(sample);
+    }
+
     private void clearCurrentMedia() {
         mediaGeneration++;
         handler.removeCallbacks(playlistAdvance);
@@ -737,7 +765,9 @@ public final class MainActivity extends Activity {
                     return true;
                 });
             } else {
-                Drawable drawable = ImageDecoder.decodeDrawable(ImageDecoder.createSource(getContentResolver(), uri));
+                Drawable drawable = ImageDecoder.decodeDrawable(
+                        ImageDecoder.createSource(getContentResolver(), uri),
+                        this::sampleStaticBackground);
                 image.setImageDrawable(drawable);
                 image.post(() -> {
                     if (mediaGeneration != generation) return;
