@@ -11,115 +11,106 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 final class PlaylistFolderImporter {
-    private static final int MAX_SCANNED_DOCUMENTS = 10000;
-
     static final class Result {
+        int recognized;
         int added;
         int failed;
         int skipped;
-        boolean limitReached;
-        boolean scanIncomplete;
     }
 
     private static final class Folder {
         final String id;
-        final String path;
+        Folder(String id) { this.id = id; }
+    }
 
-        Folder(String id, String path) {
+    private static final class Child {
+        final String id, name, mime;
+        Child(String id, String name, String mime) {
             this.id = id;
-            this.path = path;
+            this.name = name;
+            this.mime = mime;
         }
     }
 
-    private static final class Media {
-        final Uri uri;
-        final String name;
-        final String type;
-        final String sortKey;
-
-        Media(Uri uri, String name, String type, String sortKey) {
-            this.uri = uri;
-            this.name = name;
-            this.type = type;
-            this.sortKey = sortKey;
-        }
+    private interface MediaVisitor {
+        void visit(Uri uri, String name, String type);
     }
 
     private PlaylistFolderImporter() { }
 
-    static Result importTree(Context context, Uri treeUri, PlaylistStore store) {
+    static Result scanTree(Context context, Uri treeUri) {
         Result result = new Result();
+        visitTree(context, treeUri, result, (uri, name, type) -> result.recognized++);
+        return result;
+    }
+
+    static Result importTree(Context context, Uri treeUri, PlaylistStore store, long playlistId) {
+        Result result = new Result();
+        visitTree(context, treeUri, result, (uri, name, type) -> {
+            result.recognized++;
+            try {
+                if ("image".equals(type)) store.addImageTo(playlistId, uri, name);
+                else store.addVideoTo(playlistId, uri, name, treeUri);
+                result.added++;
+            } catch (Exception error) {
+                result.failed++;
+            }
+        });
+        return result;
+    }
+
+    private static void visitTree(Context context, Uri treeUri, Result result, MediaVisitor visitor) {
         ContentResolver resolver = context.getContentResolver();
         ArrayDeque<Folder> folders = new ArrayDeque<>();
         Set<String> visited = new HashSet<>();
-        List<Media> found = new ArrayList<>();
-        folders.add(new Folder(DocumentsContract.getTreeDocumentId(treeUri), ""));
-        int scanned = 0;
-        while (!folders.isEmpty() && scanned < MAX_SCANNED_DOCUMENTS) {
+        folders.add(new Folder(DocumentsContract.getTreeDocumentId(treeUri)));
+        while (!folders.isEmpty()) {
             Folder folder = folders.removeFirst();
             if (!visited.add(folder.id)) continue;
             Uri children = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, folder.id);
             String[] columns = {DocumentsContract.Document.COLUMN_DOCUMENT_ID,
                     DocumentsContract.Document.COLUMN_DISPLAY_NAME,
                     DocumentsContract.Document.COLUMN_MIME_TYPE};
+            List<Child> entries = new ArrayList<>();
             try (Cursor cursor = resolver.query(children, columns, null, null, null)) {
                 if (cursor == null) {
                     result.failed++;
                     continue;
                 }
-                int idIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
-                int nameIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
-                int mimeIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE);
-                while (cursor.moveToNext() && scanned < MAX_SCANNED_DOCUMENTS) {
-                    scanned++;
-                    String id = cursor.getString(idIndex);
-                    String name = cursor.getString(nameIndex);
-                    String mime = cursor.getString(mimeIndex);
-                    if (id == null || id.isEmpty()) {
-                        result.skipped++;
-                        continue;
-                    }
-                    if (name == null || name.isEmpty()) name = id;
-                    String path = folder.path + name;
-                    if (DocumentsContract.Document.MIME_TYPE_DIR.equals(mime)) {
-                        folders.addLast(new Folder(id, path + "/"));
-                    } else {
-                        String type = recognizedType(mime, name);
-                        if (type == null) {
-                            result.skipped++;
-                            continue;
-                        }
-                        Uri mediaUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, id);
-                        found.add(new Media(mediaUri, name, type, path));
-                    }
+                int idColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+                int nameColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+                int mimeColumn = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE);
+                while (cursor.moveToNext()) entries.add(new Child(cursor.getString(idColumn),
+                        cursor.getString(nameColumn), cursor.getString(mimeColumn)));
+            } catch (Exception error) {
+                result.failed++;
+                continue;
+            }
+            entries.sort(Comparator.comparing(child ->
+                    child.name == null ? "" : child.name.toLowerCase(Locale.ROOT)));
+            for (Child child : entries) {
+                if (child.id == null || child.id.isEmpty()) {
+                    result.skipped++;
+                    continue;
                 }
-            } catch (Exception error) {
-                result.failed++;
+                String name = child.name == null || child.name.isEmpty() ? child.id : child.name;
+                if (DocumentsContract.Document.MIME_TYPE_DIR.equals(child.mime)) {
+                    folders.addLast(new Folder(child.id));
+                    continue;
+                }
+                String type = recognizedType(child.mime, name);
+                if (type == null) {
+                    result.skipped++;
+                    continue;
+                }
+                Uri mediaUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, child.id);
+                visitor.visit(mediaUri, name, type);
             }
         }
-        if (!folders.isEmpty() || scanned >= MAX_SCANNED_DOCUMENTS) result.scanIncomplete = true;
-        found.sort(Comparator.comparing(item -> item.sortKey.toLowerCase(java.util.Locale.ROOT)));
-        int remaining = Math.max(0, PlaylistStore.MAX_ITEMS - store.entries().size());
-        for (int i = 0; i < found.size(); i++) {
-            if (remaining <= 0) {
-                result.limitReached = true;
-                result.skipped += found.size() - i;
-                break;
-            }
-            Media media = found.get(i);
-            try {
-                if ("image".equals(media.type)) store.addImage(media.uri, media.name);
-                else store.addVideo(media.uri, media.name, treeUri);
-                result.added++;
-                remaining--;
-            } catch (Exception error) {
-                result.failed++;
-            }
-        }
-        return result;
     }
 
     private static String recognizedType(String mime, String name) {
@@ -127,7 +118,7 @@ final class PlaylistFolderImporter {
             if (mime.startsWith("image/")) return "image";
             if (mime.startsWith("video/")) return "video";
         }
-        String lower = name.toLowerCase(java.util.Locale.ROOT);
+        String lower = name.toLowerCase(Locale.ROOT);
         if (lower.matches(".*\\.(jpg|jpeg|png|webp|gif|bmp|heic|heif)$")) return "image";
         if (lower.matches(".*\\.(mp4|m4v|mkv|webm|mov|avi|3gp|3g2)$")) return "video";
         return null;

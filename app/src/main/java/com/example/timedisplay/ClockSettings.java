@@ -24,6 +24,7 @@ final class ClockSettings {
     static final String BACKGROUND_PAN_Y = "background_pan_y";
     static final String BACKGROUND_SOURCE = "background_source";
     static final String PLAYLIST_ITEMS = "playlist_items";
+    static final String PLAYLIST_ACTIVE_ID = "playlist_active_id";
     static final String PLAYLIST_IMAGE_MODE = "playlist_image_mode";
     static final String PLAYLIST_VIDEO_MODE = "playlist_video_mode";
     static final String PLAYLIST_FADE = "playlist_fade";

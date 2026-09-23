@@ -1,6 +1,7 @@
 package com.example.timedisplay;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
@@ -22,6 +23,7 @@ import android.view.Gravity;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
@@ -50,6 +52,7 @@ final class SettingsPanel {
     private static final int PICK_PLAYLIST_IMAGES = 4;
     private static final int PICK_PLAYLIST_VIDEOS = 5;
     private static final int PICK_PLAYLIST_FOLDER = 6;
+    private static final int PLAYLIST_PAGE_SIZE = 50;
     private static final String[] ZONES = {
             "SYSTEM", "UTC", "Asia/Shanghai", "Asia/Hong_Kong", "Asia/Taipei",
             "Asia/Tokyo", "Asia/Seoul", "Asia/Singapore", "Asia/Manila",
@@ -98,6 +101,10 @@ final class SettingsPanel {
     private LinearLayout playlistPage;
     private LinearLayout playlistList;
     private TextView playlistInfo;
+    private TextView playlistPageInfo;
+    private Spinner savedPlaylistSpinner;
+    private int playlistPageIndex;
+    private boolean refreshingSavedLists;
     private Spinner backgroundSourceSpinner;
     private LinearLayout singleBackgroundControls;
     private Button folderButton;
@@ -273,6 +280,7 @@ final class SettingsPanel {
     private void showPlaylistPage() {
         customizationHome.setVisibility(View.GONE);
         playlistPage.setVisibility(View.VISIBLE);
+        refreshSavedLists();
         refreshPlaylistList();
         customizationPanel.scrollTo(0, 0);
     }
@@ -307,9 +315,54 @@ final class SettingsPanel {
         content = playlistPage;
         button(t("‹ 返回自定义", "‹ Back to customize"), v -> showCustomizationHome());
         section(t("播放列表", "Playlist"));
+        content.addView(label(t("选择并编辑已保存列表", "Select and edit a saved playlist"), 16));
+        savedPlaylistSpinner = new Spinner(host);
+        content.addView(savedPlaylistSpinner, new LinearLayout.LayoutParams(-1, dp(48)));
+        savedPlaylistSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long rowId) {
+                if (refreshingSavedLists) return;
+                if (folderImporting) { refreshSavedLists(); return; }
+                List<PlaylistStore.SavedList> lists = playlist.savedLists();
+                if (position >= 0 && position < lists.size() && playlist.activeId() != lists.get(position).id
+                        && playlist.select(lists.get(position).id)) {
+                    playlistPageIndex = 0;
+                    playlistChanged();
+                }
+            }
+            @Override public void onNothingSelected(AdapterView<?> parent) { }
+        });
+        LinearLayout listButtons = new LinearLayout(host);
+        listButtons.setOrientation(LinearLayout.HORIZONTAL);
+        addPlaylistManagementButton(listButtons, t("新建", "New"), () -> askPlaylistName("", false));
+        addPlaylistManagementButton(listButtons, t("另存为", "Save as"), () -> askPlaylistName("", true));
+        content.addView(listButtons);
+        LinearLayout editButtons = new LinearLayout(host);
+        editButtons.setOrientation(LinearLayout.HORIZONTAL);
+        addPlaylistManagementButton(editButtons, t("重命名", "Rename"), () -> {
+            for (PlaylistStore.SavedList list : playlist.savedLists()) {
+                if (list.id == playlist.activeId()) { askRenameList(list.name); break; }
+            }
+        });
+        addPlaylistManagementButton(editButtons, t("删除列表", "Delete list"), this::confirmDeleteList);
+        content.addView(editButtons);
+        button(t("一键清空当前列表", "Clear current playlist"), v -> confirmClearList());
         hint(t("长按项目可拖动排序；也可使用上下箭头。", "Long press to reorder, or use the arrows."));
         playlistInfo = label("", 14);
         content.addView(playlistInfo);
+        LinearLayout pageControls = new LinearLayout(host);
+        pageControls.setGravity(Gravity.CENTER_VERTICAL);
+        addPlaylistManagementButton(pageControls, t("上一页", "Previous"), () -> {
+            if (playlistPageIndex > 0) { playlistPageIndex--; refreshPlaylistList(); }
+        });
+        playlistPageInfo = label("", 13);
+        playlistPageInfo.setGravity(Gravity.CENTER);
+        pageControls.addView(playlistPageInfo, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        addPlaylistManagementButton(pageControls, t("下一页", "Next"), () -> {
+            if ((playlistPageIndex + 1) * PLAYLIST_PAGE_SIZE < playlist.count()) {
+                playlistPageIndex++; refreshPlaylistList();
+            }
+        });
+        content.addView(pageControls);
         playlistList = new LinearLayout(host);
         playlistList.setOrientation(LinearLayout.VERTICAL);
         content.addView(playlistList);
@@ -388,7 +441,97 @@ final class SettingsPanel {
         hint(t("图片和动图按停留时间切换；视频播完后切换。填充模式居中裁切。",
                 "Images and animations use this duration; videos advance when they end. Fill crops from center."));
         content = pageRoot;
+        refreshSavedLists();
         refreshPlaylistList();
+    }
+
+    private void addPlaylistManagementButton(LinearLayout row, String title, Runnable action) {
+        Button control = createButton(title, v -> action.run());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(44), 1f);
+        params.setMargins(dp(2), dp(4), dp(2), 0);
+        row.addView(control, params);
+    }
+
+    private void refreshSavedLists() {
+        if (savedPlaylistSpinner == null) return;
+        List<PlaylistStore.SavedList> lists = playlist.savedLists();
+        List<String> names = new ArrayList<>();
+        int selected = 0;
+        for (int i = 0; i < lists.size(); i++) {
+            names.add(lists.get(i).name);
+            if (lists.get(i).id == playlist.activeId()) selected = i;
+        }
+        refreshingSavedLists = true;
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(host,
+                android.R.layout.simple_spinner_item, names);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        savedPlaylistSpinner.setAdapter(adapter);
+        savedPlaylistSpinner.setSelection(selected);
+        savedPlaylistSpinner.post(() -> refreshingSavedLists = false);
+    }
+
+    private void askPlaylistName(String initial, boolean copy) {
+        if (folderImporting) return;
+        EditText input = new EditText(host);
+        input.setSingleLine(true);
+        input.setText(initial);
+        input.setSelectAllOnFocus(true);
+        new AlertDialog.Builder(host)
+                .setTitle(copy ? t("另存播放列表", "Save playlist as") : t("新建播放列表", "New playlist"))
+                .setView(input)
+                .setNegativeButton(t("取消", "Cancel"), null)
+                .setPositiveButton(t("保存", "Save"), (dialog, which) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty()) { toast(t("请输入名称", "Enter a name")); return; }
+                    long id = copy ? playlist.saveCopy(name) : playlist.createEmpty(name);
+                    if (id < 0) { toast(t("保存失败或名称已存在", "Could not save; name may exist")); return; }
+                    playlist.select(id);
+                    playlistPageIndex = 0;
+                    refreshSavedLists();
+                    playlistChanged();
+                }).show();
+    }
+
+    private void askRenameList(String initial) {
+        if (folderImporting) return;
+        EditText input = new EditText(host);
+        input.setSingleLine(true);
+        input.setText(initial);
+        input.selectAll();
+        new AlertDialog.Builder(host).setTitle(t("重命名播放列表", "Rename playlist"))
+                .setView(input).setNegativeButton(t("取消", "Cancel"), null)
+                .setPositiveButton(t("保存", "Save"), (dialog, which) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty() || !playlist.rename(playlist.activeId(), name)) {
+                        toast(t("重命名失败或名称已存在", "Could not rename; name may exist"));
+                        return;
+                    }
+                    refreshSavedLists();
+                }).show();
+    }
+
+    private void confirmDeleteList() {
+        if (folderImporting) return;
+        new AlertDialog.Builder(host).setMessage(t("删除当前播放列表及其中的项目？", "Delete this playlist and its items?"))
+                .setNegativeButton(t("取消", "Cancel"), null)
+                .setPositiveButton(t("删除", "Delete"), (dialog, which) -> {
+                    if (playlist.deleteList(playlist.activeId())) {
+                        playlistPageIndex = 0;
+                        refreshSavedLists();
+                        playlistChanged();
+                    } else toast(t("删除失败", "Could not delete playlist"));
+                }).show();
+    }
+
+    private void confirmClearList() {
+        if (folderImporting) return;
+        new AlertDialog.Builder(host).setMessage(t("清空当前播放列表中的所有项目？", "Clear all items in this playlist?"))
+                .setNegativeButton(t("取消", "Cancel"), null)
+                .setPositiveButton(t("清空", "Clear"), (dialog, which) -> {
+                    playlist.clearActive();
+                    playlistPageIndex = 0;
+                    playlistChanged();
+                }).show();
     }
 
     private ScrollView createPanel(String title) {
@@ -759,8 +902,13 @@ final class SettingsPanel {
 
     private void refreshPlaylistList() {
         if (playlistList == null) return;
-        List<PlaylistStore.Entry> items = playlist.entries();
-        playlistInfo.setText(t("共 ", "Total: ") + items.size() + t(" 项", " items"));
+        int total = playlist.count();
+        int pageCount = Math.max(1, (total + PLAYLIST_PAGE_SIZE - 1) / PLAYLIST_PAGE_SIZE);
+        playlistPageIndex = Math.max(0, Math.min(playlistPageIndex, pageCount - 1));
+        int offset = playlistPageIndex * PLAYLIST_PAGE_SIZE;
+        List<PlaylistStore.Entry> items = playlist.entries(offset, PLAYLIST_PAGE_SIZE);
+        playlistInfo.setText(t("共 ", "Total: ") + total + t(" 项", " items"));
+        playlistPageInfo.setText((playlistPageIndex + 1) + " / " + pageCount);
         playlistList.removeAllViews();
         if (items.isEmpty()) {
             TextView empty = label(t("列表为空，请添加图片或视频。", "The list is empty. Add images or videos."), 14);
@@ -770,7 +918,7 @@ final class SettingsPanel {
         }
         for (int i = 0; i < items.size(); i++) {
             PlaylistStore.Entry entry = items.get(i);
-            int position = i;
+            int position = offset + i;
             LinearLayout row = new LinearLayout(host);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
@@ -914,48 +1062,91 @@ final class SettingsPanel {
         }
         folderImporting = true;
         folderButton.setEnabled(false);
-        playlistInfo.setText(t("正在扫描并导入文件夹…", "Scanning and importing folder…"));
+        savedPlaylistSpinner.setEnabled(false);
+        playlistInfo.setText(t("正在扫描文件夹…", "Scanning folder…"));
         android.content.Context appContext = host.getApplicationContext();
+        long targetList = playlist.activeId();
+        new Thread(() -> {
+            PlaylistFolderImporter.Result scan;
+            try {
+                scan = PlaylistFolderImporter.scanTree(appContext, treeUri);
+            } catch (Exception error) {
+                scan = null;
+            }
+            PlaylistFolderImporter.Result finishedScan = scan;
+            host.runOnUiThread(() -> {
+                if (host.isDestroyed()) return;
+                if (finishedScan == null) {
+                    finishFolderImport(treeUri, appContext);
+                    toast(t("文件夹读取失败", "Could not read the folder"));
+                    return;
+                }
+                confirmHundred(targetList, finishedScan.recognized,
+                        () -> startFolderImport(treeUri, appContext, targetList),
+                        () -> finishFolderImport(treeUri, appContext));
+            });
+        }, "playlist-folder-scan").start();
+    }
+
+    private void startFolderImport(Uri treeUri, android.content.Context appContext, long targetList) {
+        playlistInfo.setText(t("正在导入文件夹…", "Importing folder…"));
         new Thread(() -> {
             PlaylistFolderImporter.Result result;
             PlaylistStore importStore = new PlaylistStore(appContext);
             try {
-                result = PlaylistFolderImporter.importTree(appContext, treeUri, importStore);
-                if (result.added > 0) ClockSettings.of(appContext).edit()
-                        .putString(ClockSettings.BACKGROUND_SOURCE, "playlist").commit();
+                result = PlaylistFolderImporter.importTree(appContext, treeUri, importStore, targetList);
             } catch (Exception error) {
                 result = null;
-            }
-            if (!importStore.usesTree(treeUri)) {
-                try {
-                    appContext.getContentResolver().releasePersistableUriPermission(treeUri,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                } catch (SecurityException ignored) { }
             }
             PlaylistFolderImporter.Result finished = result;
             host.runOnUiThread(() -> {
                 if (host.isDestroyed()) return;
-                folderImporting = false;
-                folderButton.setEnabled(true);
-                refreshPlaylistList();
+                finishFolderImport(treeUri, appContext);
                 if (finished == null) {
-                    toast(t("文件夹读取失败", "Could not read the folder"));
+                    toast(t("文件夹导入失败", "Could not import folder"));
                     return;
                 }
                 if (finished.added > 0) {
+                    prefs.edit().putString(ClockSettings.BACKGROUND_SOURCE, "playlist").apply();
                     updateSingleBackgroundControls();
                     if (backgroundSourceSpinner != null) backgroundSourceSpinner.setSelection(1);
-                    host.onSettingChanged(ClockSettings.PLAYLIST_ITEMS);
+                    playlistChanged();
                 }
-                String message = t("已添加 ", "Added ") + finished.added
-                        + t(" 项", " items");
+                String message = t("已添加 ", "Added ") + finished.added + t(" 项", " items");
                 if (finished.skipped > 0) message += t("；跳过 ", "; skipped ") + finished.skipped;
                 if (finished.failed > 0) message += t("；失败 ", "; failed ") + finished.failed;
-                if (finished.limitReached) message += t("；已达列表上限", "; playlist limit reached");
-                if (finished.scanIncomplete) message += t("；文件夹过大，扫描未完成", "; scan incomplete");
                 Toast.makeText(host, message, Toast.LENGTH_LONG).show();
             });
         }, "playlist-folder-import").start();
+    }
+
+    private void finishFolderImport(Uri treeUri, android.content.Context appContext) {
+        if (!playlist.usesTree(treeUri)) {
+            try {
+                appContext.getContentResolver().releasePersistableUriPermission(treeUri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            } catch (SecurityException ignored) { }
+        }
+        folderImporting = false;
+        folderButton.setEnabled(true);
+        savedPlaylistSpinner.setEnabled(true);
+        refreshPlaylistList();
+    }
+
+    private void confirmHundred(long listId, int incoming, Runnable proceed, Runnable cancel) {
+        int current = 0;
+        for (PlaylistStore.SavedList list : playlist.savedLists()) {
+            if (list.id == listId) { current = list.size; break; }
+        }
+        if (current < 100 && current + incoming >= 100) {
+            new AlertDialog.Builder(host)
+                    .setMessage(t("导入后列表将达到或超过 100 项，继续导入？",
+                            "This playlist will reach 100 or more items. Continue importing?"))
+                    .setNegativeButton(t("取消", "Cancel"), (dialog, which) -> cancel.run())
+                    .setOnCancelListener(dialog -> cancel.run())
+                    .setPositiveButton(t("继续导入", "Continue"), (dialog, which) -> proceed.run())
+                    .show();
+        } else proceed.run();
     }
 
     private void importPlaylistMedia(int request, Intent data) {
@@ -965,6 +1156,12 @@ final class SettingsPanel {
                 selected.add(data.getClipData().getItemAt(i).getUri());
             }
         } else if (data.getData() != null) selected.add(data.getData());
+        if (selected.isEmpty()) return;
+        long targetList = playlist.activeId();
+        confirmHundred(targetList, selected.size(), () -> addPlaylistMedia(request, selected), () -> { });
+    }
+
+    private void addPlaylistMedia(int request, List<Uri> selected) {
         int added = 0;
         int failed = 0;
         for (Uri uri : selected) {
