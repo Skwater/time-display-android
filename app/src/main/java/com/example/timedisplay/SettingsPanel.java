@@ -1278,13 +1278,21 @@ final class SettingsPanel {
             if (list.id == listId) { current = list.size; break; }
         }
         if (current < 100 && current + incoming >= 100) {
-            new AlertDialog.Builder(host)
+            AlertDialog dialog = new AlertDialog.Builder(host)
                     .setMessage(t("导入后列表将达到或超过 100 项，继续导入？",
                             "This playlist will reach 100 or more items. Continue importing?"))
-                    .setNegativeButton(t("取消", "Cancel"), (dialog, which) -> cancel.run())
-                    .setOnCancelListener(dialog -> cancel.run())
-                    .setPositiveButton(t("继续导入", "Continue"), (dialog, which) -> proceed.run())
-                    .show();
+                    .setNegativeButton(t("取消", "Cancel"), (d, which) -> cancel.run())
+                    .setOnCancelListener(d -> cancel.run())
+                    .setPositiveButton(t("继续导入", "Continue"), (d, which) -> proceed.run())
+                    .create();
+            dialog.setOnShowListener(d -> {
+                int accent = UiPalette.accent(host);
+                Button positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
+                Button negative = dialog.getButton(AlertDialog.BUTTON_NEGATIVE);
+                if (positive != null) positive.setTextColor(accent);
+                if (negative != null) negative.setTextColor(accent);
+            });
+            dialog.show();
         } else proceed.run();
     }
 
