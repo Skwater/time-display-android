@@ -62,7 +62,7 @@
 
 ## Git 版本管理
 
-项目使用 `main` 分支记录已完成的版本。每次功能修改提交代码与更新记录；构建出的版本化 APK 仅保留在本地 `releases/`，不上传 GitHub。构建缓存、下载的工具、签名密钥和 `releases/` 均由 `.gitignore` 排除。推送到远端前，请单独安全备份 `app/signing/time-display-debug.keystore`，以便在其他机器上继续使用相同签名。
+项目使用 `main` 分支记录已完成的版本。每次功能修改提交代码与更新记录；构建出的版本化 APK 仅保留在本地 `releases/`，不上传 GitHub。构建缓存、下载的工具、签名密钥库（`app/signing/*.keystore`）、签名凭据（`keystore.properties`）和 `releases/` 均由 `.gitignore` 排除。推送远端前，请单独安全备份 Debug 与 Release 两把密钥库及 `keystore.properties`，以便在其他机器上继续使用相同签名。
 
 ## 工作区规范
 

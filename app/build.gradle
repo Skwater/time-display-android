@@ -10,6 +10,7 @@ if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
 def fixedDebugKeystore = file('signing/time-display-debug.keystore')
+def fixedReleaseKeystore = file('signing/time-display-release.keystore')
 
 android {
     namespace 'com.example.timedisplay'
@@ -32,6 +33,15 @@ android {
                 keyPassword keystoreProps.getProperty('keyPassword')
             }
         }
+        // 正式版签名：凭据取自 keystore.properties 的 release* 字段，密钥存在时才启用。
+        if (keystorePropsFile.exists() && fixedReleaseKeystore.exists()) {
+            release {
+                storeFile file(keystoreProps.getProperty('releaseStoreFile'))
+                storePassword keystoreProps.getProperty('releaseStorePassword')
+                keyAlias keystoreProps.getProperty('releaseKeyAlias')
+                keyPassword keystoreProps.getProperty('releaseKeyPassword')
+            }
+        }
     }
 
     buildTypes {
@@ -40,10 +50,22 @@ android {
                 signingConfig signingConfigs.debug
             }
         }
+        release {
+            if (keystorePropsFile.exists() && fixedReleaseKeystore.exists()) {
+                signingConfig signingConfigs.release
+            }
+            minifyEnabled false
+        }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // 离线环境无 lint-gradle 依赖缓存，release 构建禁用 lint vital（其 lint 检查与打包无关）。
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
     }
 }
