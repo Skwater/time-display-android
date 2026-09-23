@@ -86,9 +86,7 @@ cd time-display-android
 .\gradlew.bat :app:assembleDebug
 ```
 
-生成的 APK 位于 `app/build/outputs/apk/debug/`，版本化副本位于 `releases/`。0.9.2 已完成 `assembleDebug`，APK 版本号为 18 / 0.9.2，应用名为“屏幕时钟”。`apksigner verify` 通过，签名证书 SHA-256 为 `9E:2A:7F:51:06:CA:4D:71:91:3F:FF:F1:EC:C2:4A:21:20:88:9E:B0:6A:3E:BA:D2:15:5E:87:E6:0B:AD:07:03`，与此前版本一致。APK 文件 SHA-256 为 `8D3003E9DEEC2F58FA9ECE5C3BE3E21F47F7B42E5DA5FE9A551EECC961C3D40F`。用户说明此前打包版本均已在设备上完成验收；0.9.2 尚待设备验收，重点覆盖 T65。
-
-0.9.3 的字体大小功能仅完成源码修改与编译检查，尚未生成 APK；设备验收重点为 T66。
+生成的 APK 位于 `app/build/outputs/apk/debug/`，版本化副本位于 `releases/`。0.9.3 已完成 `assembleDebug`，APK 版本号为 19 / 0.9.3，应用名为“屏幕时钟”。`apksigner verify` 通过，签名证书 SHA-256 为 `9E:2A:7F:51:06:CA:4D:71:91:3F:FF:F1:EC:C2:4A:21:20:88:9E:B0:6A:3E:BA:D2:15:5E:87:E6:0B:AD:07:03`，与此前版本一致。APK 文件 SHA-256 为 `C9AD85B7ABCCADFD28FC4F815C3548A43FBC90F2B34714C16B686BC4F9E336EF`。用户说明此前打包版本均已在设备上完成验收；0.9.3 尚待设备验收，重点覆盖 T66。
 
 ## 4. 发布前剩余工作
 
