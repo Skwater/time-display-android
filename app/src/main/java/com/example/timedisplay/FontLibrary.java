@@ -56,7 +56,8 @@ final class FontLibrary {
         List<Entry> available = new ArrayList<>(entries);
         File legacy = legacyFile();
         if (legacy != null && legacy.isFile()) {
-            available.add(new Entry("legacy", readFamilyName(legacy, "旧版字体")));
+            available.add(new Entry("legacy", readFamilyName(legacy,
+                    L10n.text(context, "旧版字体", "Legacy font"))));
         }
         return available;
     }
@@ -141,7 +142,7 @@ final class FontLibrary {
     }
 
     private String uniqueName(String name) {
-        String base = name.isEmpty() ? "导入字体" : name;
+        String base = name.isEmpty() ? L10n.text(context, "导入字体", "Imported font") : name;
         String candidate = base;
         int suffix = 2;
         boolean used;

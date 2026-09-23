@@ -46,14 +46,19 @@ final class ClockFaceView extends View {
             zone = ZoneId.systemDefault();
         }
         ZonedDateTime dateTime = Instant.ofEpochMilli(now).atZone(zone);
+        boolean english = L10n.english(getContext());
         boolean seconds = prefs.getBoolean(ClockSettings.SHOW_SECONDS, true);
         String time = dateTime.format(DateTimeFormatter.ofPattern(seconds ? "HH:mm:ss" : "HH:mm", Locale.ROOT));
         List<String> details = new ArrayList<>();
         if (prefs.getBoolean(ClockSettings.SHOW_ZONE, true)) {
-            details.add("SYSTEM".equals(zoneId) ? "系统时区 · " + zone.getId() : zone.getId());
+            details.add("SYSTEM".equals(zoneId)
+                    ? L10n.text(getContext(), "系统时区 · ", "System time zone · ") + zone.getId()
+                    : zone.getId());
         }
         if (prefs.getBoolean(ClockSettings.SHOW_DATE, true)) {
-            details.add(dateTime.format(DateTimeFormatter.ofPattern("yyyy年M月d日 EEEE", Locale.CHINA)));
+            details.add(dateTime.format(DateTimeFormatter.ofPattern(
+                    english ? "EEEE, MMM d, yyyy" : "yyyy年M月d日 EEEE",
+                    L10n.locale(getContext()))));
         }
         if (prefs.getBoolean(ClockSettings.SHOW_LUNAR, false)) {
             details.add(lunarDate(now, zone.getId()));
@@ -90,7 +95,8 @@ final class ClockFaceView extends View {
             canvas.drawText(detail, getWidth() / 2f, y, paint);
             paint.setTextSize(detailSize);
         }
-        setContentDescription(time + "，" + String.join("，", details));
+        String separator = english ? ", " : "，";
+        setContentDescription(time + separator + String.join(separator, details));
     }
 
     private String lunarDate(long millis, String zoneId) {
@@ -99,9 +105,13 @@ final class ClockFaceView extends View {
         int month = calendar.get(ChineseCalendar.MONTH);
         int day = calendar.get(ChineseCalendar.DATE);
         if (month < 0 || month >= LUNAR_MONTHS.length || day < 1 || day > LUNAR_DAYS.length) {
-            return "农历日期不可用";
+            return L10n.text(getContext(), "农历日期不可用", "Lunar date unavailable");
         }
-        String leap = calendar.get(ChineseCalendar.IS_LEAP_MONTH) == 1 ? "闰" : "";
+        boolean leapMonth = calendar.get(ChineseCalendar.IS_LEAP_MONTH) == 1;
+        if (L10n.english(getContext())) {
+            return "Lunar " + (leapMonth ? "leap " : "") + "month " + (month + 1) + ", day " + day;
+        }
+        String leap = leapMonth ? "闰" : "";
         return "农历 " + leap + LUNAR_MONTHS[month] + "月" + LUNAR_DAYS[day - 1];
     }
 

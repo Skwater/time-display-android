@@ -41,7 +41,7 @@ public final class MainActivity extends Activity {
         }
     };
     private FrameLayout root;
-    private ImageView image;
+    private BackgroundImageView image;
     private VideoView video;
     private ClockFaceView face;
     private AnimatedImageDrawable animation;
@@ -74,7 +74,7 @@ public final class MainActivity extends Activity {
 
         root = new FrameLayout(this);
         root.setBackgroundColor(Color.rgb(12, 19, 32));
-        image = new ImageView(this);
+        image = new BackgroundImageView(this);
         root.addView(image, new FrameLayout.LayoutParams(-1, -1));
         backgroundShade = new View(this);
         backgroundShade.setBackgroundColor(Color.BLACK);
@@ -198,6 +198,10 @@ public final class MainActivity extends Activity {
     }
 
     void onSettingChanged(String key) {
+        if (ClockSettings.LANGUAGE.equals(key)) {
+            recreate();
+            return;
+        }
         face.update(System.currentTimeMillis());
         if (ClockSettings.ORIENTATION.equals(key)) applyOrientation();
         if (ClockSettings.PANEL_TRANSPARENCY.equals(key)) updatePanelTransparency();
@@ -266,9 +270,9 @@ public final class MainActivity extends Activity {
         previewControls.setOrientation(LinearLayout.HORIZONTAL);
         previewControls.setGravity(Gravity.CENTER);
         previewControls.setVisibility(View.GONE);
-        Button reset = previewButton("重置");
-        Button save = previewButton("保存");
-        Button cancel = previewButton("取消");
+        Button reset = previewButton(L10n.text(this, "重置", "Reset"));
+        Button save = previewButton(L10n.text(this, "保存", "Save"));
+        Button cancel = previewButton(L10n.text(this, "取消", "Cancel"));
         reset.setOnClickListener(v -> {
             previewScale = 1f;
             previewPanX = 0f;
@@ -314,15 +318,15 @@ public final class MainActivity extends Activity {
     void startBackgroundPreview() {
         SharedPreferences prefs = ClockSettings.of(this);
         if (prefs.getString(ClockSettings.BACKGROUND_URI, "").isEmpty()) {
-            Toast.makeText(this, "请先选择图片背景", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, L10n.text(this, "请先选择图片背景", "Choose an image first"), Toast.LENGTH_SHORT).show();
             return;
         }
         if ("video".equals(prefs.getString(ClockSettings.BACKGROUND_TYPE, "image"))) {
-            Toast.makeText(this, "视频背景暂不支持位置调整", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, L10n.text(this, "视频背景暂不支持位置调整", "Video position editing is unavailable"), Toast.LENGTH_SHORT).show();
             return;
         }
         if (image.getDrawable() == null || image.getWidth() == 0) {
-            Toast.makeText(this, "图片尚未加载，请稍后重试", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, L10n.text(this, "图片尚未加载，请稍后重试", "Image is still loading; try again"), Toast.LENGTH_SHORT).show();
             return;
         }
         leftPanel.animate().cancel();
@@ -391,12 +395,14 @@ public final class MainActivity extends Activity {
         int width = image.getWidth();
         int height = image.getHeight();
         if (drawable == null || width <= 0 || height <= 0) return;
-        boolean stretch = "stretch".equals(ClockSettings.of(this)
-                .getString(ClockSettings.BACKGROUND_MODE, "fill"));
+        String mode = ClockSettings.of(this).getString(ClockSettings.BACKGROUND_MODE, "fill");
         int sourceWidth = drawable.getIntrinsicWidth();
         int sourceHeight = drawable.getIntrinsicHeight();
         if (sourceWidth <= 0 || sourceHeight <= 0) {
-            image.setScaleType(stretch ? ImageView.ScaleType.FIT_XY : ImageView.ScaleType.CENTER_CROP);
+            image.setTileTransform(false, 1f, 0f, 0f);
+            image.setScaleType("stretch".equals(mode) ? ImageView.ScaleType.FIT_XY
+                    : "fit".equals(mode) ? ImageView.ScaleType.FIT_CENTER
+                    : ImageView.ScaleType.CENTER_CROP);
             return;
         }
         SharedPreferences prefs = ClockSettings.of(this);
@@ -404,9 +410,15 @@ public final class MainActivity extends Activity {
                 : prefs.getFloat(ClockSettings.BACKGROUND_SCALE, 1f), 1f, 4f);
         float panX = previewMode ? previewPanX : prefs.getFloat(ClockSettings.BACKGROUND_PAN_X, 0f);
         float panY = previewMode ? previewPanY : prefs.getFloat(ClockSettings.BACKGROUND_PAN_Y, 0f);
+        if ("tile".equals(mode)) {
+            image.setTileTransform(true, zoom, panX * width, panY * height);
+            return;
+        }
+        image.setTileTransform(false, 1f, 0f, 0f);
         float scaleX = width / (float) sourceWidth;
         float scaleY = height / (float) sourceHeight;
-        if (!stretch) scaleX = scaleY = Math.max(scaleX, scaleY);
+        if ("fill".equals(mode)) scaleX = scaleY = Math.max(scaleX, scaleY);
+        if ("fit".equals(mode)) scaleX = scaleY = Math.min(scaleX, scaleY);
         scaleX *= zoom;
         scaleY *= zoom;
         float displayedWidth = sourceWidth * scaleX;
@@ -443,7 +455,7 @@ public final class MainActivity extends Activity {
         }
         image.setImageDrawable(null);
         updateBackgroundShade(prefs);
-        boolean stretch = "stretch".equals(prefs.getString(ClockSettings.BACKGROUND_MODE, "fill"));
+        String mode = prefs.getString(ClockSettings.BACKGROUND_MODE, "fill");
         String value = prefs.getString(ClockSettings.BACKGROUND_URI, "");
         if (value.isEmpty()) return;
         Uri uri = Uri.parse(value);
@@ -461,12 +473,12 @@ public final class MainActivity extends Activity {
                     if (video != current || !active) return;
                     player.setLooping(true);
                     player.setVolume(0, 0);
-                    root.post(() -> sizeVideo(current, player, stretch));
+                    root.post(() -> sizeVideo(current, player, mode));
                     current.start();
                 });
                 current.setOnErrorListener((player, what, extra) -> {
                     backgroundShade.setAlpha(0f);
-                    Toast.makeText(this, "视频无法播放，请在右侧面板更换背景", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, L10n.text(this, "视频无法播放，请在右侧面板更换背景", "Video cannot play; choose another background"), Toast.LENGTH_LONG).show();
                     return true;
                 });
             } else {
@@ -481,7 +493,7 @@ public final class MainActivity extends Activity {
             }
         } catch (Exception error) {
             backgroundShade.setAlpha(0f);
-            Toast.makeText(this, "背景文件无法打开，请在右侧面板重新选择", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, L10n.text(this, "背景文件无法打开，请在右侧面板重新选择", "Background cannot be opened; choose it again"), Toast.LENGTH_LONG).show();
         }
     }
 
@@ -491,13 +503,15 @@ public final class MainActivity extends Activity {
         backgroundShade.setAlpha(hasBackground ? dim / 100f : 0f);
     }
 
-    private void sizeVideo(VideoView current, MediaPlayer player, boolean stretch) {
+    private void sizeVideo(VideoView current, MediaPlayer player, String mode) {
         if (video != current || root.getWidth() == 0 || root.getHeight() == 0) return;
         int width = root.getWidth();
         int height = root.getHeight();
-        if (!stretch && player.getVideoWidth() > 0 && player.getVideoHeight() > 0) {
-            float scale = Math.max(width / (float) player.getVideoWidth(),
-                    height / (float) player.getVideoHeight());
+        if (!"stretch".equals(mode) && player.getVideoWidth() > 0 && player.getVideoHeight() > 0) {
+            float widthScale = width / (float) player.getVideoWidth();
+            float heightScale = height / (float) player.getVideoHeight();
+            float scale = "fill".equals(mode) ? Math.max(widthScale, heightScale)
+                    : Math.min(widthScale, heightScale);
             width = Math.round(player.getVideoWidth() * scale);
             height = Math.round(player.getVideoHeight() * scale);
         }

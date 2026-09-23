@@ -61,12 +61,11 @@ final class SettingsPanel {
             "Australia/Sydney", "Australia/Brisbane", "Pacific/Auckland", "Pacific/Fiji"
     };
     private static final String[] ORIENTATION_VALUES = {"auto", "portrait", "landscape"};
-    private static final String[] MODE_VALUES = {"fill", "stretch"};
+    private static final String[] MODE_VALUES = {"fill", "fit", "stretch", "tile"};
+    private static final String[] LANGUAGE_VALUES = {"system", "zh", "en"};
     private static final String[] FONT_VALUES = {"system", "sans", "serif", "mono"};
-    private static final String[] FONT_LABELS = {"默认字体", "轻体无衬线", "衬线", "等宽"};
     private static final String[] COLOR_KEYS = {ClockSettings.FONT_OPACITY,
             ClockSettings.FONT_INTENSITY, ClockSettings.FONT_HUE, ClockSettings.FONT_SATURATION};
-    private static final String[] COLOR_LABELS = {"透明度：", "颜色强度：", "颜色：", "饱和："};
 
     private final MainActivity host;
     private final SharedPreferences prefs;
@@ -113,31 +112,36 @@ final class SettingsPanel {
     }
 
     ScrollView createSettingsPanel() {
-        ScrollView panel = createPanel("设置");
-        hint("向左滑动或点击面板外侧关闭");
-        section("时间与日期");
-        spinner("显示时区", zoneLabels(), ZONES, ClockSettings.ZONE, "SYSTEM");
-        toggle("显示时区文字", ClockSettings.SHOW_ZONE, true);
-        toggle("显示公历日期和星期", ClockSettings.SHOW_DATE, true);
-        toggle("显示中国农历", ClockSettings.SHOW_LUNAR, false);
-        toggle("显示秒数", ClockSettings.SHOW_SECONDS, true);
-        section("屏幕");
-        spinner("屏幕方向", new String[]{"跟随设备", "竖屏", "横屏"},
+        ScrollView panel = createPanel(t("设置", "Settings"));
+        hint(t("向左滑动或点击面板外侧关闭", "Swipe left or tap outside to close"));
+        section(t("语言", "Language"));
+        spinner(t("应用语言", "App language"),
+                new String[]{t("跟随系统", "Follow system"), "中文", "English"},
+                LANGUAGE_VALUES, ClockSettings.LANGUAGE, "system");
+        section(t("时间与日期", "Time and date"));
+        spinner(t("显示时区", "Time zone"), zoneLabels(), ZONES, ClockSettings.ZONE, "SYSTEM");
+        toggle(t("显示时区文字", "Show time zone"), ClockSettings.SHOW_ZONE, true);
+        toggle(t("显示公历日期和星期", "Show date and weekday"), ClockSettings.SHOW_DATE, true);
+        toggle(t("显示中国农历", "Show Chinese lunar date"), ClockSettings.SHOW_LUNAR, false);
+        toggle(t("显示秒数", "Show seconds"), ClockSettings.SHOW_SECONDS, true);
+        section(t("屏幕", "Screen"));
+        spinner(t("屏幕方向", "Orientation"),
+                new String[]{t("跟随设备", "Follow device"), t("竖屏", "Portrait"), t("横屏", "Landscape")},
                 ORIENTATION_VALUES, ClockSettings.ORIENTATION, "auto");
-        section("界面");
+        section(t("界面", "Interface"));
         TextView transparencyInfo = label("", 16);
         content.addView(transparencyInfo);
         SeekBar transparency = new SeekBar(host);
         transparency.setMax(80);
         transparency.setProgress(Math.max(0, Math.min(80,
                 prefs.getInt(ClockSettings.PANEL_TRANSPARENCY, 5))));
-        transparencyInfo.setText("侧栏背景透明度：" + transparency.getProgress() + "%");
-        transparency.setContentDescription("侧栏背景透明度，0% 到 80%");
+        transparencyInfo.setText(t("侧栏背景透明度：", "Panel transparency: ") + transparency.getProgress() + "%");
+        transparency.setContentDescription(t("侧栏背景透明度，0% 到 80%", "Panel transparency, 0 to 80 percent"));
         tintSlider(transparency);
         protectSlider(transparency);
         transparency.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                transparencyInfo.setText("侧栏背景透明度：" + progress + "%");
+                transparencyInfo.setText(t("侧栏背景透明度：", "Panel transparency: ") + progress + "%");
                 if (fromUser) {
                     prefs.edit().putInt(ClockSettings.PANEL_TRANSPARENCY, progress).apply();
                     host.onSettingChanged(ClockSettings.PANEL_TRANSPARENCY);
@@ -147,28 +151,31 @@ final class SettingsPanel {
             @Override public void onStopTrackingTouch(SeekBar bar) { }
         });
         content.addView(transparency, new LinearLayout.LayoutParams(-1, dp(48)));
-        hint("仅调整左右侧栏背景；文字和时钟画面不变。");
+        hint(t("仅调整左右侧栏背景；文字和时钟画面不变。", "Only the panels change; the clock and image stay the same."));
         return panel;
     }
 
     ScrollView createCustomizationPanel() {
-        ScrollView panel = createPanel("自定义");
-        hint("向右滑动或点击面板外侧关闭");
-        section("背景");
-        spinner("背景适配", new String[]{"填充（保持比例并裁切）", "拉伸（铺满，可能变形）"},
+        ScrollView panel = createPanel(t("自定义", "Customize"));
+        hint(t("向右滑动或点击面板外侧关闭", "Swipe right or tap outside to close"));
+        section(t("背景", "Background"));
+        spinner(t("背景适配", "Image layout"),
+                new String[]{t("填充", "Fill"), t("适应", "Fit"), t("拉伸", "Stretch"), t("平铺", "Tile")},
                 MODE_VALUES, ClockSettings.BACKGROUND_MODE, "fill");
+        hint(t("平铺适用于图片；视频选择平铺时按适应显示。",
+                "Tile applies to images; videos use Fit when Tile is selected."));
         brightnessInfo = label("", 16);
         content.addView(brightnessInfo);
         SeekBar brightness = new SeekBar(host);
         brightness.setMax(70);
         brightness.setProgress(Math.max(0, Math.min(70, prefs.getInt(ClockSettings.BACKGROUND_DIM, 0))));
-        brightnessInfo.setText("背景亮度：" + (100 - brightness.getProgress()) + "%");
-        brightness.setContentDescription("背景亮度，100% 为原图亮度，最低 30%");
+        brightnessInfo.setText(t("背景亮度：", "Background brightness: ") + (100 - brightness.getProgress()) + "%");
+        brightness.setContentDescription(t("背景亮度，100% 为原图亮度，最低 30%", "Background brightness, 30 to 100 percent"));
         tintSlider(brightness);
         protectSlider(brightness);
         brightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                brightnessInfo.setText("背景亮度：" + (100 - progress) + "%");
+                brightnessInfo.setText(t("背景亮度：", "Background brightness: ") + (100 - progress) + "%");
                 if (fromUser) {
                     prefs.edit().putInt(ClockSettings.BACKGROUND_DIM, progress).apply();
                     host.onSettingChanged(ClockSettings.BACKGROUND_DIM);
@@ -178,13 +185,14 @@ final class SettingsPanel {
             @Override public void onStopTrackingTouch(SeekBar bar) { }
         });
         content.addView(brightness, new LinearLayout.LayoutParams(-1, dp(48)));
-        hint("100% 为原图亮度；向右拖动可降低背景亮度。");
+        hint(t("100% 为原图亮度；向右拖动可降低背景亮度。",
+                "100% is the original image brightness; drag right to dim."));
         backgroundInfo = label("", 14);
         content.addView(backgroundInfo);
         LinearLayout mediaButtons = new LinearLayout(host);
         mediaButtons.setOrientation(LinearLayout.HORIZONTAL);
-        Button imageButton = createButton("选择图片", v -> pickImage());
-        Button videoButton = createButton("选择视频", v -> pickVideo());
+        Button imageButton = createButton(t("选择图片", "Choose image"), v -> pickImage());
+        Button videoButton = createButton(t("选择视频", "Choose video"), v -> pickVideo());
         LinearLayout.LayoutParams imageParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
         LinearLayout.LayoutParams videoParams = new LinearLayout.LayoutParams(0, dp(50), 1f);
         imageParams.setMargins(0, dp(6), dp(3), 0);
@@ -192,29 +200,30 @@ final class SettingsPanel {
         mediaButtons.addView(imageButton, imageParams);
         mediaButtons.addView(videoButton, videoParams);
         content.addView(mediaButtons);
-        button("预览并调整背景位置", v -> host.startBackgroundPreview());
-        button("恢复默认背景", v -> {
+        button(t("预览并调整背景位置", "Preview and position image"), v -> host.startBackgroundPreview());
+        button(t("恢复默认背景", "Reset background"), v -> {
             prefs.edit().remove(ClockSettings.BACKGROUND_URI).remove(ClockSettings.BACKGROUND_TYPE)
                     .remove(ClockSettings.BACKGROUND_SCALE).remove(ClockSettings.BACKGROUND_PAN_X)
                     .remove(ClockSettings.BACKGROUND_PAN_Y).apply();
             updateInfo();
             host.onSettingChanged(ClockSettings.BACKGROUND_URI);
         });
-        section("字体");
+        section(t("字体", "Font"));
         createFontMenu();
-        toggle("文字加粗", ClockSettings.FONT_BOLD, false);
-        toggle("文字阴影", ClockSettings.TEXT_SHADOW, true);
+        toggle(t("文字加粗", "Bold text"), ClockSettings.FONT_BOLD, false);
+        toggle(t("文字阴影", "Text shadow"), ClockSettings.TEXT_SHADOW, true);
         createFontColorControls();
         fontInfo = label("", 14);
         content.addView(fontInfo);
-        button("导入 TTF / OTF 字体", v -> pickFont());
-        button("恢复默认字体", v -> {
+        button(t("导入 TTF / OTF 字体", "Import TTF / OTF font"), v -> pickFont());
+        button(t("恢复默认字体", "Reset font"), v -> {
             prefs.edit().putString(ClockSettings.FONT, "system").remove(ClockSettings.FONT_FILE).apply();
             updateFontMenuLabel();
             updateInfo();
             host.onSettingChanged(ClockSettings.FONT);
         });
-        hint("视频背景静音循环播放；长时间亮屏可能增加耗电。");
+        hint(t("视频背景静音循环播放；长时间亮屏可能增加耗电。",
+                "Videos play silently on a loop; keeping the screen on uses power."));
         updateInfo();
         return panel;
     }
@@ -227,7 +236,7 @@ final class SettingsPanel {
         panel.setBackgroundColor(Color.argb(Math.round(255 * (100 - transparency) / 100f),
                 20, 29, 44));
         panel.setElevation(dp(12));
-        panel.setContentDescription(title + "面板");
+        panel.setContentDescription(title + t("面板", " panel"));
         content = new LinearLayout(host);
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(20), dp(24), dp(20), dp(32));
@@ -241,7 +250,7 @@ final class SettingsPanel {
         Instant now = Instant.now();
         for (int i = 0; i < ZONES.length; i++) {
             String id = ZONES[i];
-            String name = "SYSTEM".equals(id) ? "跟随系统"
+            String name = "SYSTEM".equals(id) ? t("跟随系统", "Follow system")
                     : "UTC".equals(id) ? "UTC"
                     : id.substring(id.lastIndexOf('/') + 1).replace('_', ' ') + " (" + id + ")";
             try {
@@ -374,7 +383,7 @@ final class SettingsPanel {
     }
 
     private void createFontMenu() {
-        content.addView(label("字体样式", 16));
+        content.addView(label(t("字体样式", "Font style"), 16));
         fontMenuLabel = label("", 16);
         fontMenuLabel.setGravity(Gravity.CENTER_VERTICAL);
         fontMenuLabel.setPadding(dp(12), 0, dp(12), 0);
@@ -396,8 +405,9 @@ final class SettingsPanel {
         LinearLayout choices = new LinearLayout(host);
         choices.setOrientation(LinearLayout.VERTICAL);
         choices.setBackgroundColor(0xFF263448);
+        String[] fontLabels = fontLabels();
         for (int i = 0; i < FONT_VALUES.length; i++) {
-            addFontChoice(choices, FONT_LABELS[i], FONT_VALUES[i], null);
+            addFontChoice(choices, fontLabels[i], FONT_VALUES[i], null);
         }
         List<FontLibrary.Entry> imported = fonts.entries();
         for (FontLibrary.Entry entry : imported) {
@@ -435,16 +445,16 @@ final class SettingsPanel {
         if (entry != null) {
             TextView remove = label("×", 18);
             remove.setGravity(Gravity.CENTER);
-            remove.setContentDescription("删除字体 " + name);
+            remove.setContentDescription(t("删除字体 ", "Delete font ") + name);
             remove.setOnClickListener(v -> {
                 if (fonts.remove(entry)) {
                     if (fontPopup != null) fontPopup.dismiss();
                     updateFontMenuLabel();
                     updateInfo();
                     host.onSettingChanged(ClockSettings.FONT);
-                    toast("已删除：" + name);
+                    toast(t("已删除：", "Deleted: ") + name);
                 } else {
-                    toast("删除字体失败");
+                    toast(t("删除字体失败", "Could not delete font"));
                 }
             });
             row.addView(remove, new LinearLayout.LayoutParams(dp(42), dp(48)));
@@ -454,11 +464,17 @@ final class SettingsPanel {
 
     private String selectedFontName() {
         String selected = prefs.getString(ClockSettings.FONT, "system");
+        String[] labels = fontLabels();
         for (int i = 0; i < FONT_VALUES.length; i++) {
-            if (FONT_VALUES[i].equals(selected)) return FONT_LABELS[i];
+            if (FONT_VALUES[i].equals(selected)) return labels[i];
         }
         FontLibrary.Entry entry = fonts.find(selected);
-        return entry == null ? "默认字体" : entry.name;
+        return entry == null ? t("默认字体", "Default font") : entry.name;
+    }
+
+    private String[] fontLabels() {
+        return new String[]{t("默认字体", "Default font"), t("轻体无衬线", "Light sans serif"),
+                t("衬线", "Serif"), t("等宽", "Monospace")};
     }
 
     private void updateFontMenuLabel() {
@@ -469,7 +485,7 @@ final class SettingsPanel {
         LinearLayout header = new LinearLayout(host);
         header.setOrientation(LinearLayout.HORIZONTAL);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        colorHeaderLabel = label("字体颜色 ▸", 18);
+        colorHeaderLabel = label(t("字体颜色 ▸", "Text color ▸"), 18);
         header.addView(colorHeaderLabel, new LinearLayout.LayoutParams(0, dp(48), 1f));
         colorPreview = new View(host);
         LinearLayout.LayoutParams swatch = new LinearLayout.LayoutParams(dp(24), dp(24));
@@ -483,14 +499,21 @@ final class SettingsPanel {
         header.setOnClickListener(v -> {
             boolean open = colorControls.getVisibility() != View.VISIBLE;
             colorControls.setVisibility(open ? View.VISIBLE : View.GONE);
-            colorHeaderLabel.setText(open ? "字体颜色 ▾" : "字体颜色 ▸");
+            colorHeaderLabel.setText(open ? t("字体颜色 ▾", "Text color ▾")
+                    : t("字体颜色 ▸", "Text color ▸"));
         });
+        String[] colorLabels = colorLabels();
         for (int i = 0; i < COLOR_KEYS.length; i++) {
-            addColorSlider(COLOR_LABELS[i], COLOR_KEYS[i], i == 2 ? 360 : 100,
+            addColorSlider(colorLabels[i], COLOR_KEYS[i], i == 2 ? 360 : 100,
                     i == 0 || i == 1 ? 100 : 0);
         }
         refreshColorTracks();
         refreshColorThumbs();
+    }
+
+    private String[] colorLabels() {
+        return new String[]{t("透明度：", "Opacity:"), t("颜色强度：", "Intensity:"),
+                t("颜色：", "Hue:"), t("饱和：", "Saturation:")};
     }
 
     private void addColorSlider(String title, String key, int maximum, int fallback) {
@@ -507,7 +530,7 @@ final class SettingsPanel {
         slider.setSplitTrack(false);
         slider.setProgressTintList(null);
         slider.setProgressBackgroundTintList(null);
-        slider.setContentDescription(title + "滑条");
+        slider.setContentDescription(title + t("滑条", " slider"));
         protectSlider(slider);
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
@@ -613,7 +636,7 @@ final class SettingsPanel {
             try {
                 String mime = host.getContentResolver().getType(uri);
                 if (mime != null && !mime.startsWith("image/")) {
-                    toast("请选择图片文件");
+                    toast(t("请选择图片文件", "Choose an image file"));
                     return;
                 }
                 File temporary = new File(host.getFilesDir(), "background-image-importing");
@@ -631,13 +654,13 @@ final class SettingsPanel {
                 updateInfo();
                 host.onSettingChanged(ClockSettings.BACKGROUND_URI);
             } catch (Exception error) {
-                toast("图片导入失败，请重试");
+                toast(t("图片导入失败，请重试", "Image import failed; try again"));
             }
         } else if (request == PICK_VIDEO) {
             try {
                 String mime = host.getContentResolver().getType(uri);
                 if (mime == null || !mime.startsWith("video/")) {
-                    toast("请选择视频文件");
+                    toast(t("请选择视频文件", "Choose a video file"));
                     return;
                 }
                 host.getContentResolver().takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -648,13 +671,13 @@ final class SettingsPanel {
                 updateInfo();
                 host.onSettingChanged(ClockSettings.BACKGROUND_URI);
             } catch (Exception error) {
-                toast("无法保存视频文件的访问权限");
+                toast(t("无法保存视频文件的访问权限", "Could not keep access to the video"));
             }
         } else if (request == PICK_FONT) {
             String name = displayName(uri);
             String lower = name.toLowerCase(Locale.ROOT);
             if (!lower.endsWith(".ttf") && !lower.endsWith(".otf")) {
-                toast("请选择 TTF 或 OTF 字体");
+                toast(t("请选择 TTF 或 OTF 字体", "Choose a TTF or OTF font"));
                 return;
             }
             try {
@@ -662,9 +685,9 @@ final class SettingsPanel {
                 updateFontMenuLabel();
                 updateInfo();
                 host.onSettingChanged(ClockSettings.FONT);
-                toast("已导入：" + imported.name);
+                toast(t("已导入：", "Imported: ") + imported.name);
             } catch (Exception error) {
-                toast("字体导入失败：请检查格式与大小");
+                toast(t("字体导入失败：请检查格式与大小", "Font import failed; check its format and size"));
             }
         }
     }
@@ -679,11 +702,14 @@ final class SettingsPanel {
 
     private void updateInfo() {
         String uri = prefs.getString(ClockSettings.BACKGROUND_URI, "");
-        backgroundInfo.setText(uri.isEmpty() ? "当前：深色纯色背景"
-                : "当前：" + ("video".equals(prefs.getString(ClockSettings.BACKGROUND_TYPE, "image")) ? "视频" : "图片") + "文件");
-        fontInfo.setText("当前字体：" + selectedFontName());
+        backgroundInfo.setText(uri.isEmpty() ? t("当前：深色纯色背景", "Current: dark solid background")
+                : t("当前：", "Current: ")
+                + ("video".equals(prefs.getString(ClockSettings.BACKGROUND_TYPE, "image"))
+                ? t("视频", "video") : t("图片", "image")) + t("文件", " file"));
+        fontInfo.setText(t("当前字体：", "Current font: ") + selectedFontName());
     }
 
     private void toast(String text) { Toast.makeText(host, text, Toast.LENGTH_SHORT).show(); }
+    private String t(String chinese, String english) { return L10n.text(host, chinese, english); }
     private int dp(int value) { return Math.round(value * host.getResources().getDisplayMetrics().density); }
 }

@@ -9,6 +9,7 @@ final class ClockSettings {
     static final String ZONE = "zone";
     static final String SHOW_ZONE = "show_zone";
     static final String ORIENTATION = "orientation";
+    static final String LANGUAGE = "language";
     static final String SHOW_DATE = "show_date";
     static final String SHOW_LUNAR = "show_lunar";
     static final String SHOW_SECONDS = "show_seconds";
