@@ -74,23 +74,40 @@ final class ClockFaceView extends View {
             paint.clearShadowLayer();
         }
         float maxWidth = Math.max(1, getWidth() - dp(32));
+        float fontScale = Math.max(50, Math.min(200,
+                prefs.getInt(ClockSettings.FONT_SIZE_PERCENT, 100))) / 100f;
         float timeSize = Math.min(getWidth() * 0.16f, getHeight() * 0.28f);
-        timeSize = Math.max(dp(24), timeSize);
+        timeSize = Math.max(dp(24), timeSize) * fontScale;
         paint.setTextSize(timeSize);
-        while (paint.measureText(time) > maxWidth && timeSize > dp(18)) {
-            timeSize -= dp(2);
+        float minimumTimeSize = dp(9);
+        while (paint.measureText(time) > maxWidth && timeSize > minimumTimeSize) {
+            timeSize = Math.max(minimumTimeSize, timeSize - dp(2) * fontScale);
             paint.setTextSize(timeSize);
         }
-        float detailSize = Math.max(dp(14), Math.min(getWidth() * 0.035f, getHeight() * 0.05f));
+        float detailSize = Math.max(dp(14),
+                Math.min(getWidth() * 0.035f, getHeight() * 0.05f)) * fontScale;
         float lineHeight = detailSize * 1.6f;
-        float blockHeight = timeSize + dp(14) + details.size() * lineHeight;
+        float gap = dp(14) * fontScale;
+        float blockHeight = timeSize + gap + details.size() * lineHeight;
+        float availableHeight = Math.max(1, getHeight() - dp(24));
+        float layoutFit = 1f;
+        if (blockHeight > availableHeight) {
+            layoutFit = availableHeight / blockHeight;
+            timeSize *= layoutFit;
+            detailSize *= layoutFit;
+            lineHeight *= layoutFit;
+            gap *= layoutFit;
+            blockHeight = timeSize + gap + details.size() * lineHeight;
+        }
         float y = (getHeight() - blockHeight) / 2f + timeSize;
+        paint.setTextSize(timeSize);
         canvas.drawText(time, getWidth() / 2f, y, paint);
         paint.setTextSize(detailSize);
         for (String detail : details) {
             y += lineHeight;
-            while (paint.measureText(detail) > maxWidth && paint.getTextSize() > dp(12)) {
-                paint.setTextSize(paint.getTextSize() - dp(1));
+            float minimumDetailSize = dp(6) * layoutFit;
+            while (paint.measureText(detail) > maxWidth && paint.getTextSize() > minimumDetailSize) {
+                paint.setTextSize(Math.max(minimumDetailSize, paint.getTextSize() - dp(1) * fontScale));
             }
             canvas.drawText(detail, getWidth() / 2f, y, paint);
             paint.setTextSize(detailSize);

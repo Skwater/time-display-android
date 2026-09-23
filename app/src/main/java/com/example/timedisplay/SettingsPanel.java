@@ -258,6 +258,7 @@ final class SettingsPanel {
         button(t("管理播放列表", "Manage playlist"), v -> showPlaylistPage());
         section(t("字体", "Font"));
         createFontMenu();
+        createFontSizeControls();
         toggle(t("文字加粗", "Bold text"), ClockSettings.FONT_BOLD, false);
         toggle(t("文字阴影", "Text shadow"), ClockSettings.TEXT_SHADOW, true);
         createFontColorControls();
@@ -823,6 +824,44 @@ final class SettingsPanel {
 
     private void updateFontMenuLabel() {
         if (fontMenuLabel != null) fontMenuLabel.setText(selectedFontName() + "  ▾");
+    }
+
+    private void createFontSizeControls() {
+        int saved = Math.max(50, Math.min(200,
+                prefs.getInt(ClockSettings.FONT_SIZE_PERCENT, 100)));
+        TextView sizeLabel = label(t("字体大小：", "Font size: ") + saved + "%", 16);
+        content.addView(sizeLabel);
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        SeekBar sizeSlider = new SeekBar(host);
+        sizeSlider.setMax(150);
+        sizeSlider.setProgress(saved - 50);
+        sizeSlider.setContentDescription(t("字体大小，50% 到 200%", "Font size, 50 to 200 percent"));
+        tintSlider(sizeSlider);
+        protectSlider(sizeSlider);
+        sizeSlider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                int percent = progress + 50;
+                sizeLabel.setText(t("字体大小：", "Font size: ") + percent + "%");
+                if (fromUser) {
+                    prefs.edit().putInt(ClockSettings.FONT_SIZE_PERCENT, percent).apply();
+                    host.onSettingChanged(ClockSettings.FONT_SIZE_PERCENT);
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
+        row.addView(sizeSlider, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        Button reset = createButton(t("重置", "Reset"), v -> {
+            sizeSlider.setProgress(50);
+            prefs.edit().putInt(ClockSettings.FONT_SIZE_PERCENT, 100).apply();
+            host.onSettingChanged(ClockSettings.FONT_SIZE_PERCENT);
+        });
+        LinearLayout.LayoutParams resetParams = new LinearLayout.LayoutParams(dp(76), dp(44));
+        resetParams.leftMargin = dp(6);
+        row.addView(reset, resetParams);
+        content.addView(row);
     }
 
     private void createFontColorControls() {
