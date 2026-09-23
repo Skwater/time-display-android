@@ -7,17 +7,20 @@ import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
-import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Build;
 import android.provider.OpenableColumns;
 import android.provider.MediaStore;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.Gravity;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
+import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.Spinner;
@@ -26,7 +29,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
@@ -60,21 +62,33 @@ final class SettingsPanel {
     };
     private static final String[] ORIENTATION_VALUES = {"auto", "portrait", "landscape"};
     private static final String[] MODE_VALUES = {"fill", "stretch"};
-    private static final String[] FONT_VALUES = {"system", "sans", "serif", "mono", "custom"};
+    private static final String[] FONT_VALUES = {"system", "sans", "serif", "mono"};
+    private static final String[] FONT_LABELS = {"默认字体", "轻体无衬线", "衬线", "等宽"};
+    private static final String[] COLOR_KEYS = {ClockSettings.FONT_OPACITY,
+            ClockSettings.FONT_INTENSITY, ClockSettings.FONT_HUE, ClockSettings.FONT_SATURATION};
+    private static final String[] COLOR_LABELS = {"透明度：", "颜色强度：", "颜色：", "饱和："};
 
     private final MainActivity host;
     private final SharedPreferences prefs;
+    private final FontLibrary fonts;
     private final List<Button> buttons = new ArrayList<>();
     private final List<SeekBar> sliders = new ArrayList<>();
     private final List<Switch> switches = new ArrayList<>();
+    private final List<SeekBar> colorSliders = new ArrayList<>();
     private LinearLayout content;
     private TextView backgroundInfo;
     private TextView brightnessInfo;
     private TextView fontInfo;
+    private TextView fontMenuLabel;
+    private TextView colorHeaderLabel;
+    private View colorPreview;
+    private LinearLayout colorControls;
+    private PopupWindow fontPopup;
 
     SettingsPanel(MainActivity host) {
         this.host = host;
         this.prefs = ClockSettings.of(host);
+        this.fonts = new FontLibrary(host, prefs);
     }
 
     void refreshAccent() {
@@ -94,6 +108,8 @@ final class SettingsPanel {
             control.setTrackTintList(new ColorStateList(states,
                     new int[]{UiPalette.withAlpha(accent, 150), 0x66708090}));
         }
+        refreshColorThumbs();
+        refreshColorTracks();
     }
 
     ScrollView createSettingsPanel() {
@@ -185,15 +201,16 @@ final class SettingsPanel {
             host.onSettingChanged(ClockSettings.BACKGROUND_URI);
         });
         section("字体");
-        spinner("字体样式", new String[]{"默认字体", "轻体无衬线", "衬线", "等宽", "自定义字体"},
-                FONT_VALUES, ClockSettings.FONT, "system");
+        createFontMenu();
         toggle("文字加粗", ClockSettings.FONT_BOLD, false);
         toggle("文字阴影", ClockSettings.TEXT_SHADOW, true);
+        createFontColorControls();
         fontInfo = label("", 14);
         content.addView(fontInfo);
         button("导入 TTF / OTF 字体", v -> pickFont());
         button("恢复默认字体", v -> {
             prefs.edit().putString(ClockSettings.FONT, "system").remove(ClockSettings.FONT_FILE).apply();
+            updateFontMenuLabel();
             updateInfo();
             host.onSettingChanged(ClockSettings.FONT);
         });
@@ -356,6 +373,202 @@ final class SettingsPanel {
         return button;
     }
 
+    private void createFontMenu() {
+        content.addView(label("字体样式", 16));
+        fontMenuLabel = label("", 16);
+        fontMenuLabel.setGravity(Gravity.CENTER_VERTICAL);
+        fontMenuLabel.setPadding(dp(12), 0, dp(12), 0);
+        GradientDrawable background = new GradientDrawable();
+        background.setColor(0x66374759);
+        background.setCornerRadius(dp(6));
+        background.setStroke(dp(1), 0xFF8996A8);
+        fontMenuLabel.setBackground(background);
+        fontMenuLabel.setOnClickListener(v -> showFontMenu());
+        content.addView(fontMenuLabel, new LinearLayout.LayoutParams(-1, dp(48)));
+        updateFontMenuLabel();
+    }
+
+    private void showFontMenu() {
+        if (fontPopup != null && fontPopup.isShowing()) {
+            fontPopup.dismiss();
+            return;
+        }
+        LinearLayout choices = new LinearLayout(host);
+        choices.setOrientation(LinearLayout.VERTICAL);
+        choices.setBackgroundColor(0xFF263448);
+        for (int i = 0; i < FONT_VALUES.length; i++) {
+            addFontChoice(choices, FONT_LABELS[i], FONT_VALUES[i], null);
+        }
+        List<FontLibrary.Entry> imported = fonts.entries();
+        for (FontLibrary.Entry entry : imported) {
+            addFontChoice(choices, entry.name, entry.value(), entry);
+        }
+        ScrollView scroll = new ScrollView(host);
+        scroll.addView(choices);
+        int height = Math.min(dp(340), dp(48) * (FONT_VALUES.length + imported.size()));
+        fontPopup = new PopupWindow(scroll, fontMenuLabel.getWidth(), height, true);
+        fontPopup.setBackgroundDrawable(new ColorDrawable(0xFF263448));
+        fontPopup.setOutsideTouchable(true);
+        fontPopup.setElevation(dp(12));
+        fontPopup.showAsDropDown(fontMenuLabel);
+    }
+
+    private void addFontChoice(LinearLayout choices, String name, String value, FontLibrary.Entry entry) {
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView title = label(name, 16);
+        title.setSingleLine(true);
+        title.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        if (value.equals(prefs.getString(ClockSettings.FONT, "system"))) {
+            title.setTextColor(UiPalette.accent(host));
+        }
+        title.setPadding(dp(12), 0, dp(4), 0);
+        row.addView(title, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        row.setOnClickListener(v -> {
+            prefs.edit().putString(ClockSettings.FONT, value).apply();
+            if (fontPopup != null) fontPopup.dismiss();
+            updateFontMenuLabel();
+            updateInfo();
+            host.onSettingChanged(ClockSettings.FONT);
+        });
+        if (entry != null) {
+            TextView remove = label("×", 18);
+            remove.setGravity(Gravity.CENTER);
+            remove.setContentDescription("删除字体 " + name);
+            remove.setOnClickListener(v -> {
+                if (fonts.remove(entry)) {
+                    if (fontPopup != null) fontPopup.dismiss();
+                    updateFontMenuLabel();
+                    updateInfo();
+                    host.onSettingChanged(ClockSettings.FONT);
+                    toast("已删除：" + name);
+                } else {
+                    toast("删除字体失败");
+                }
+            });
+            row.addView(remove, new LinearLayout.LayoutParams(dp(42), dp(48)));
+        }
+        choices.addView(row, new LinearLayout.LayoutParams(-1, dp(48)));
+    }
+
+    private String selectedFontName() {
+        String selected = prefs.getString(ClockSettings.FONT, "system");
+        for (int i = 0; i < FONT_VALUES.length; i++) {
+            if (FONT_VALUES[i].equals(selected)) return FONT_LABELS[i];
+        }
+        FontLibrary.Entry entry = fonts.find(selected);
+        return entry == null ? "默认字体" : entry.name;
+    }
+
+    private void updateFontMenuLabel() {
+        if (fontMenuLabel != null) fontMenuLabel.setText(selectedFontName() + "  ▾");
+    }
+
+    private void createFontColorControls() {
+        LinearLayout header = new LinearLayout(host);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        colorHeaderLabel = label("字体颜色 ▸", 18);
+        header.addView(colorHeaderLabel, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        colorPreview = new View(host);
+        LinearLayout.LayoutParams swatch = new LinearLayout.LayoutParams(dp(24), dp(24));
+        swatch.rightMargin = dp(8);
+        header.addView(colorPreview, swatch);
+        content.addView(header);
+        colorControls = new LinearLayout(host);
+        colorControls.setOrientation(LinearLayout.VERTICAL);
+        colorControls.setVisibility(View.GONE);
+        content.addView(colorControls);
+        header.setOnClickListener(v -> {
+            boolean open = colorControls.getVisibility() != View.VISIBLE;
+            colorControls.setVisibility(open ? View.VISIBLE : View.GONE);
+            colorHeaderLabel.setText(open ? "字体颜色 ▾" : "字体颜色 ▸");
+        });
+        for (int i = 0; i < COLOR_KEYS.length; i++) {
+            addColorSlider(COLOR_LABELS[i], COLOR_KEYS[i], i == 2 ? 360 : 100,
+                    i == 0 || i == 1 ? 100 : 0);
+        }
+        refreshColorTracks();
+        refreshColorThumbs();
+    }
+
+    private void addColorSlider(String title, String key, int maximum, int fallback) {
+        LinearLayout row = new LinearLayout(host);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView titleView = label(title, 14);
+        row.addView(titleView, new LinearLayout.LayoutParams(dp(88), dp(44)));
+        titleView.setGravity(Gravity.CENTER_VERTICAL);
+        SeekBar slider = new SeekBar(host);
+        slider.setMax(maximum);
+        slider.setProgress(Math.max(0, Math.min(maximum, prefs.getInt(key, fallback))));
+        slider.setPadding(dp(7), 0, dp(7), 0);
+        slider.setSplitTrack(false);
+        slider.setProgressTintList(null);
+        slider.setProgressBackgroundTintList(null);
+        slider.setContentDescription(title + "滑条");
+        protectSlider(slider);
+        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                if (fromUser) {
+                    prefs.edit().putInt(key, progress).apply();
+                    refreshColorTracks();
+                    host.onSettingChanged(key);
+                }
+            }
+            @Override public void onStartTrackingTouch(SeekBar bar) { }
+            @Override public void onStopTrackingTouch(SeekBar bar) { }
+        });
+        row.addView(slider, new LinearLayout.LayoutParams(0, dp(44), 1f));
+        colorControls.addView(row, new LinearLayout.LayoutParams(-1, dp(44)));
+        colorSliders.add(slider);
+    }
+
+    private void refreshColorTracks() {
+        if (colorSliders.size() != 4) return;
+        int hue = Math.max(0, Math.min(360, prefs.getInt(ClockSettings.FONT_HUE, 0)));
+        float saturation = Math.max(0, Math.min(100,
+                prefs.getInt(ClockSettings.FONT_SATURATION, 0))) / 100f;
+        float intensity = Math.max(0, Math.min(100,
+                prefs.getInt(ClockSettings.FONT_INTENSITY, 100))) / 100f;
+        int solid = Color.HSVToColor(new float[]{hue, saturation, intensity});
+        setColorTrack(colorSliders.get(0), new int[]{Color.TRANSPARENT, solid});
+        setColorTrack(colorSliders.get(1), new int[]{Color.BLACK,
+                Color.HSVToColor(new float[]{hue, saturation, 1f})});
+        setColorTrack(colorSliders.get(2), new int[]{Color.RED, Color.YELLOW, Color.GREEN,
+                Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED});
+        setColorTrack(colorSliders.get(3), new int[]{
+                Color.HSVToColor(new float[]{hue, 0f, intensity}),
+                Color.HSVToColor(new float[]{hue, 1f, intensity})});
+        if (colorPreview != null) {
+            GradientDrawable swatch = new GradientDrawable();
+            swatch.setColor(ClockSettings.fontColor(prefs));
+            swatch.setCornerRadius(dp(4));
+            swatch.setStroke(dp(1), Color.WHITE);
+            colorPreview.setBackground(swatch);
+        }
+    }
+
+    private void refreshColorThumbs() {
+        int accent = UiPalette.accent(host);
+        for (SeekBar slider : colorSliders) {
+            GradientDrawable thumb = new GradientDrawable();
+            thumb.setColor(accent);
+            thumb.setCornerRadius(dp(4));
+            thumb.setSize(dp(12), dp(22));
+            slider.setThumb(thumb);
+            slider.setThumbTintList(null);
+        }
+    }
+
+    private void setColorTrack(SeekBar slider, int[] colors) {
+        GradientDrawable track = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors);
+        track.setCornerRadius(dp(3));
+        track.setSize(dp(1), dp(5));
+        slider.setProgressDrawable(track);
+    }
+
     private void pickImage() {
         Intent intent;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -438,40 +651,20 @@ final class SettingsPanel {
                 toast("无法保存视频文件的访问权限");
             }
         } else if (request == PICK_FONT) {
-            String name = displayName(uri).toLowerCase(Locale.ROOT);
-            if (!name.endsWith(".ttf") && !name.endsWith(".otf")) {
+            String name = displayName(uri);
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (!lower.endsWith(".ttf") && !lower.endsWith(".otf")) {
                 toast("请选择 TTF 或 OTF 字体");
                 return;
             }
-            File target = new File(host.getFilesDir(), "custom-font" + (name.endsWith(".otf") ? ".otf" : ".ttf"));
-            File temporary = new File(host.getCacheDir(), "importing-font");
-            try (InputStream input = host.getContentResolver().openInputStream(uri);
-                 FileOutputStream output = new FileOutputStream(temporary)) {
-                if (input == null) throw new IllegalArgumentException("文件不可读");
-                byte[] buffer = new byte[8192];
-                int count;
-                long total = 0;
-                while ((count = input.read(buffer)) != -1) {
-                    total += count;
-                    if (total > 20L * 1024 * 1024) throw new IllegalArgumentException("字体超过 20 MB");
-                    output.write(buffer, 0, count);
-                }
-                Typeface.createFromFile(temporary);
-                if (!temporary.renameTo(target)) {
-                    try (InputStream source = new java.io.FileInputStream(temporary);
-                         FileOutputStream destination = new FileOutputStream(target)) {
-                        while ((count = source.read(buffer)) != -1) destination.write(buffer, 0, count);
-                    }
-                }
-                prefs.edit().putString(ClockSettings.FONT_FILE, target.getAbsolutePath())
-                        .putString(ClockSettings.FONT, "custom").apply();
+            try {
+                FontLibrary.Entry imported = fonts.importFont(uri, name);
+                updateFontMenuLabel();
                 updateInfo();
                 host.onSettingChanged(ClockSettings.FONT);
-                toast("字体已导入");
+                toast("已导入：" + imported.name);
             } catch (Exception error) {
                 toast("字体导入失败：请检查格式与大小");
-            } finally {
-                temporary.delete();
             }
         }
     }
@@ -488,8 +681,7 @@ final class SettingsPanel {
         String uri = prefs.getString(ClockSettings.BACKGROUND_URI, "");
         backgroundInfo.setText(uri.isEmpty() ? "当前：深色纯色背景"
                 : "当前：" + ("video".equals(prefs.getString(ClockSettings.BACKGROUND_TYPE, "image")) ? "视频" : "图片") + "文件");
-        fontInfo.setText(prefs.getString(ClockSettings.FONT_FILE, "").isEmpty()
-                ? "当前：系统字体" : "已导入本地字体");
+        fontInfo.setText("当前字体：" + selectedFontName());
     }
 
     private void toast(String text) { Toast.makeText(host, text, Toast.LENGTH_SHORT).show(); }

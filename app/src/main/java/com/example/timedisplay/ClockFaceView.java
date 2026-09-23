@@ -61,9 +61,10 @@ final class ClockFaceView extends View {
 
         paint.setTypeface(loadTypeface(prefs));
         paint.setTextAlign(Paint.Align.CENTER);
-        paint.setColor(Color.WHITE);
+        int fontColor = ClockSettings.fontColor(prefs);
+        paint.setColor(fontColor);
         if (prefs.getBoolean(ClockSettings.TEXT_SHADOW, true)) {
-            paint.setShadowLayer(dp(8), 0, dp(3), Color.BLACK);
+            paint.setShadowLayer(dp(8), 0, dp(3), Color.argb(Color.alpha(fontColor), 0, 0, 0));
         } else {
             paint.clearShadowLayer();
         }
@@ -112,6 +113,8 @@ final class ClockFaceView extends View {
             if ("sans".equals(style)) base = Typeface.create("sans-serif-light", Typeface.NORMAL);
             if ("serif".equals(style)) base = Typeface.SERIF;
             if ("mono".equals(style)) base = Typeface.MONOSPACE;
+            File imported = FontLibrary.fileFor(getContext(), style);
+            if (imported != null && imported.isFile()) base = Typeface.createFromFile(imported);
             if ("custom".equals(style)) {
                 String path = prefs.getString(ClockSettings.FONT_FILE, "");
                 if (!path.isEmpty()) base = Typeface.createFromFile(new File(path));

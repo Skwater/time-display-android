@@ -2,6 +2,7 @@ package com.example.timedisplay;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Color;
 
 final class ClockSettings {
     static final String PREFS = "clock_settings";
@@ -23,10 +24,27 @@ final class ClockSettings {
     static final String PANEL_TRANSPARENCY = "panel_transparency";
     static final String FONT = "font";
     static final String FONT_FILE = "font_file";
+    static final String FONT_LIBRARY = "font_library";
+    static final String FONT_OPACITY = "font_opacity";
+    static final String FONT_INTENSITY = "font_intensity";
+    static final String FONT_HUE = "font_hue";
+    static final String FONT_SATURATION = "font_saturation";
 
     private ClockSettings() { }
 
     static SharedPreferences of(Context context) {
         return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    static int fontColor(SharedPreferences prefs) {
+        int alpha = Math.round(255 * bounded(prefs.getInt(FONT_OPACITY, 100), 100) / 100f);
+        float hue = bounded(prefs.getInt(FONT_HUE, 0), 360);
+        float saturation = bounded(prefs.getInt(FONT_SATURATION, 0), 100) / 100f;
+        float intensity = bounded(prefs.getInt(FONT_INTENSITY, 100), 100) / 100f;
+        return Color.HSVToColor(alpha, new float[]{hue, saturation, intensity});
+    }
+
+    private static int bounded(int value, int maximum) {
+        return Math.max(0, Math.min(maximum, value));
     }
 }

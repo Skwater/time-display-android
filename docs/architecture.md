@@ -28,7 +28,8 @@ SettingsPanel ──写入──> SharedPreferences
 - `MainActivity` 创建背景层、可调暗度层、时钟层和双侧抽屉；暗度默认为 0。在 `onResume` 装载设置，在 `onPause` 停止计时回调与动画。水平手势控制面板，面板宽度上限为屏幕的 82%。
 - 双侧面板外的点击拦截层保持透明，打开面板时不会改变背景亮度。亮度滑杆触摸期间暂停抽屉水平手势，松手后恢复。
 - `ClockFaceView` 在每次重绘时读取设置，将当前瞬间映射到选定时区，再绘制时间、公历、农历。
-- `SettingsPanel` 负责左侧时间设置、右侧外观自定义与媒体导入。图片复制到应用私有目录，视频保留系统文档 URI；字体复制到应用私有目录。
+- `SettingsPanel` 负责左侧时间设置、右侧外观自定义与媒体导入。图片复制到应用私有目录，视频保留系统文档 URI；字体菜单提供导入项选择和删除。
+- `FontLibrary` 将每个 TTF / OTF 复制为 `files/fonts/` 中独立的 UUID 文件，校验大小和可加载性，优先读取字体内部 family 名称；旧版单字体设置在首次启动时迁移。元数据保存在 `SharedPreferences`，删除条目时同时删除副本。
 - `ClockSettings` 集中定义键名，避免散落的字符串。
 - `UiPalette` 在 Android 12 及以上读取系统动态强调色，旧系统提供回退色。按钮、开关和滑杆使用同一颜色来源。
 
@@ -45,7 +46,7 @@ SettingsPanel ──写入──> SharedPreferences
 | 静态图片 | 相册 URI → 应用私有文件 → `ImageDecoder` | `ImageView`。 |
 | GIF / 动态 WebP | 相册 URI → 应用私有文件 → `AnimatedImageDrawable` | 页面可见时播放。 |
 | 视频 | 文档 URI → `VideoView` | 静音循环；退出页面停止。 |
-| TTF / OTF | 文档 URI → 校验并复制到私有目录 | `Typeface.createFromFile`。 |
+| TTF / OTF | 文档 URI → 校验并复制到 `files/fonts/` | 多字体列表按名称选择；`Typeface.createFromFile`。 |
 
 背景适配对图片使用 `CENTER_CROP` 或 `FIT_XY`。视频在解码信息可用后计算容器尺寸：填充取覆盖屏幕所需的较大缩放比；拉伸使用容器宽高。不同设备的 `VideoView` / `SurfaceView` 渲染行为仍需真机确认。
 
@@ -54,6 +55,8 @@ SettingsPanel ──写入──> SharedPreferences
 图片背景改为 `ImageView.ScaleType.MATRIX`：先按填充或拉伸计算基础矩阵，再叠加用户缩放与按屏幕宽高归一化的平移。平移被限制在图片边缘以内。预览触摸由 `ScaleGestureDetector` 和单指位移处理；保存时写入缩放及两个平移值，取消时恢复持久化值。视频保持 `VideoView` 的原有适配方式，不进入手势预览。
 
 侧栏透明度只修改两个面板的背景颜色 alpha；文字及面板外的背景保持原值。时区选择项的前缀在创建面板时依据当前时区规则与当前时刻计算，因此包含夏令时偏移。
+
+字体颜色用四个整数设置保存透明度、HSV 明度、色相及饱和度，默认组成不透明白色。`ClockFaceView` 用 `Color.HSVToColor` 计算文字色，文字阴影沿用相同透明度。右侧的颜色区默认折叠，四条滑条使用相同宽度的标签列及剩余轨道宽度；轨道分别显示透明度、明度、色相与饱和度的渐变。
 
 ## 5. 状态与权限
 
