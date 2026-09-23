@@ -4,7 +4,7 @@
 
 ## 项目状态
 
-已创建可导入 Android Studio 的原生 Java 项目。0.4.1 Debug APK 位于 `releases/time-display-0.4.1-debug.apk`，构建原件位于 `app/build/outputs/apk/debug/app-debug.apk`。构建与签名校验已通过；尚未完成设备实测，验收步骤见 [测试计划](docs/test-plan.md)。
+已创建可导入 Android Studio 的原生 Java 项目。0.4.2 Debug APK 位于 `releases/time-display-0.4.2-debug.apk`，构建原件位于 `app/build/outputs/apk/debug/app-debug.apk`。构建与签名校验已通过；尚未完成设备实测，验收步骤见 [测试计划](docs/test-plan.md)。
 
 ## 运行
 
@@ -21,6 +21,8 @@
 0.4.0 更新：按钮使用 Android 12 及以上的系统动态强调色，旧系统使用固定颜色；新增侧栏透明度、主要时区及当前 UTC 偏移前缀、图片位置预览。
 
 0.4.1 更新：将背景导入拆为并排的图片和视频按钮；图片优先调用系统相册选图界面，视频沿用文件选择器。
+
+0.4.2 更新：字体菜单首项改为设备当前默认字体；原有轻体无衬线、系统衬线、系统等宽及自定义字体依次排列。已明确选择轻体无衬线的用户升级后仍保留该选择。
 
 ## 文档
 

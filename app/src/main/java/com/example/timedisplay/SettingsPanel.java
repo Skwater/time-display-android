@@ -60,7 +60,7 @@ final class SettingsPanel {
     };
     private static final String[] ORIENTATION_VALUES = {"auto", "portrait", "landscape"};
     private static final String[] MODE_VALUES = {"fill", "stretch"};
-    private static final String[] FONT_VALUES = {"sans", "serif", "mono", "custom"};
+    private static final String[] FONT_VALUES = {"system", "sans", "serif", "mono", "custom"};
 
     private final MainActivity host;
     private final SharedPreferences prefs;
@@ -185,15 +185,15 @@ final class SettingsPanel {
             host.onSettingChanged(ClockSettings.BACKGROUND_URI);
         });
         section("字体");
-        spinner("字体样式", new String[]{"默认无衬线", "衬线", "等宽", "自定义字体"},
-                FONT_VALUES, ClockSettings.FONT, "sans");
+        spinner("字体样式", new String[]{"默认字体（系统正在使用）", "轻体无衬线", "系统衬线", "系统等宽", "自定义字体"},
+                FONT_VALUES, ClockSettings.FONT, "system");
         toggle("文字加粗", ClockSettings.FONT_BOLD, false);
         toggle("文字阴影", ClockSettings.TEXT_SHADOW, true);
         fontInfo = label("", 14);
         content.addView(fontInfo);
         button("导入 TTF / OTF 字体", v -> pickFont());
         button("恢复默认字体", v -> {
-            prefs.edit().putString(ClockSettings.FONT, "sans").remove(ClockSettings.FONT_FILE).apply();
+            prefs.edit().putString(ClockSettings.FONT, "system").remove(ClockSettings.FONT_FILE).apply();
             updateInfo();
             host.onSettingChanged(ClockSettings.FONT);
         });

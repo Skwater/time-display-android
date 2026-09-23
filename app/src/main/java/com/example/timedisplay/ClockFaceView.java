@@ -105,8 +105,9 @@ final class ClockFaceView extends View {
     }
 
     private Typeface loadTypeface(SharedPreferences prefs) {
-        String style = prefs.getString(ClockSettings.FONT, "sans");
-        Typeface base = Typeface.create("sans-serif-light", Typeface.NORMAL);
+        String style = prefs.getString(ClockSettings.FONT, "system");
+        Typeface base = Typeface.DEFAULT;
+        if ("sans".equals(style)) base = Typeface.create("sans-serif-light", Typeface.NORMAL);
         if ("custom".equals(style)) {
             String path = prefs.getString(ClockSettings.FONT_FILE, "");
             if (!path.isEmpty()) {
