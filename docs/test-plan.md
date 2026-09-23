@@ -60,7 +60,7 @@ cd time-display-android
 .\gradlew.bat :app:assembleDebug
 ```
 
-生成的 APK 位于 `app/build/outputs/apk/debug/`，版本化副本位于 `releases/`。最近一次打包为 0.4.2；用户反馈每次打包后均已在设备上完成验收，具体设备及逐项结果未记录。0.5.0 已完成 Java 编译检查，并用本机 Arial、Calibri 字体核对了字体名称读取；尚未打包或进行设备验收。下一次设备验收重点见 T36–T40。
+生成的 APK 位于 `app/build/outputs/apk/debug/`，版本化副本位于 `releases/`。0.5.0 已完成 `assembleDebug`，APK 的版本号为 10 / 0.5.0，签名证书 SHA-256 为 `9E:2A:7F:51:06:CA:4D:71:91:3F:FF:F1:EC:C2:4A:21:20:88:9E:B0:6A:3E:BA:D2:15:5E:87:E6:0B:AD:07:03`，与此前版本一致。字体名称读取已用本机 Arial、Calibri 核对。用户反馈此前每次打包后均已在设备上完成验收，具体设备及逐项结果未记录；0.5.0 尚待设备验收，重点见 T36–T40。
 
 ## 4. 发布前剩余工作
 
