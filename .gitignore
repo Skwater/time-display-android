@@ -7,3 +7,10 @@
 /.tooling/
 /.gradle-user-home/
 /app/signing/*.keystore
+
+# 工作区规范（2026-09）：本地保留，不上传
+# 文档仅上传 README.md，其余文档保留在本地 docs/（不纳入版本控制）
+/docs/
+# 临时文件与回收站：与源码无关的文件一律移入对应目录，禁止删除
+/.tmp/
+/.trash/

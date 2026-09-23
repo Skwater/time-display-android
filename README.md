@@ -54,13 +54,22 @@
 
 ## 文档
 
-- [产品需求与验收标准](docs/requirements.md)
-- [技术设计与数据流](docs/architecture.md)
-- [测试计划与发布检查](docs/test-plan.md)
+- `docs/requirements.md`  产品需求与验收标准
+- `docs/architecture.md`  技术设计与数据流
+- `docs/test-plan.md`     测试计划与发布检查
+
+> 按工作区规范，`docs/` 目录中的文档仅保留在本地，不随 Git 上传。仓库内唯一的文档文件为 `README.md`。
 
 ## Git 版本管理
 
 项目使用 `main` 分支记录已完成的版本。每次功能修改提交代码与文档；构建出的版本化 APK 保存在 `releases/` 并随版本提交。构建缓存、下载的工具和本机签名密钥由 `.gitignore` 排除。推送到远端前，请单独安全备份 `app/signing/time-display-debug.keystore`，以便在其他机器上继续使用相同签名。
+
+## 工作区规范
+
+- 新增任何与源码无关的临时文件统一放入 `.tmp/`，垃圾/废弃文件统一移入 `.trash/`；两个目录均不纳入版本控制。
+- **所有文件禁止直接删除**，一律移动到 `.trash/` 中保留。
+- 文档只允许上传 `README.md`；`docs/` 目录中的其余文档保留在本地，不随 Git 上传。
+- 签名密钥 `app/signing/time-display-debug.keystore` 由 `.gitignore` 排除，请自行离线备份。
 
 ## 目录
 
@@ -76,5 +85,7 @@ app/src/main/java/com/example/timedisplay/
   L10n.java                应用语言选择与中英文文案
   PlaylistStore.java       背景播放列表文件和顺序管理
   PlaylistFolderImporter.java 文件夹扫描与媒体导入
-docs/                    产品与开发文档
+docs/                    产品与开发文档（仅本地保留，不上传）
+.tmp/                    临时文件（不上传）
+.trash/                  垃圾回收区（不上传）
 ```
