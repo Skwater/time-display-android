@@ -49,6 +49,7 @@ public final class MainActivity extends Activity {
         }
     };
     private FrameLayout root;
+    private View defaultBackgroundLayer;
     private BackgroundImageView image;
     private VideoView video;
     private ClockFaceView face;
@@ -95,7 +96,10 @@ public final class MainActivity extends Activity {
         applyImmersiveMode();
 
         root = new FrameLayout(this);
-        root.setBackgroundColor(Color.rgb(12, 19, 32));
+        root.setBackgroundColor(Color.BLACK);
+        defaultBackgroundLayer = new View(this);
+        root.addView(defaultBackgroundLayer, new FrameLayout.LayoutParams(-1, -1));
+        updateDefaultBackgroundColor(ClockSettings.of(this));
         image = new BackgroundImageView(this);
         root.addView(image, new FrameLayout.LayoutParams(-1, -1));
         backgroundShade = new View(this);
@@ -170,6 +174,7 @@ public final class MainActivity extends Activity {
             }
         }
         applyOrientation();
+        updateDefaultBackgroundColor(ClockSettings.of(this));
         loadBackground(ClockSettings.of(this));
         panels.refreshPlaylistPauseButton();
         handler.removeCallbacks(tick);
@@ -263,6 +268,11 @@ public final class MainActivity extends Activity {
         face.update(System.currentTimeMillis());
         if (ClockSettings.ORIENTATION.equals(key)) applyOrientation();
         if (ClockSettings.PANEL_TRANSPARENCY.equals(key)) updatePanelTransparency();
+        if (ClockSettings.DEFAULT_BACKGROUND_OPACITY.equals(key)
+                || ClockSettings.DEFAULT_BACKGROUND_INTENSITY.equals(key)
+                || ClockSettings.DEFAULT_BACKGROUND_HUE.equals(key)
+                || ClockSettings.DEFAULT_BACKGROUND_SATURATION.equals(key))
+            updateDefaultBackgroundColor(ClockSettings.of(this));
         if (ClockSettings.BACKGROUND_DIM.equals(key) || ClockSettings.PLAYLIST_DIM.equals(key))
             updateBackgroundShade(ClockSettings.of(this));
         boolean playlistSetting = ClockSettings.PLAYLIST_ITEMS.equals(key)
@@ -829,6 +839,10 @@ public final class MainActivity extends Activity {
                 "playlist".equals(prefs.getString(ClockSettings.BACKGROUND_SOURCE, "single"))
                         ? ClockSettings.PLAYLIST_DIM : ClockSettings.BACKGROUND_DIM, 0)));
         backgroundShade.setAlpha(hasBackground ? dim / 100f : 0f);
+    }
+
+    private void updateDefaultBackgroundColor(SharedPreferences prefs) {
+        defaultBackgroundLayer.setBackgroundColor(ClockSettings.defaultBackgroundColor(prefs));
     }
 
     private void sizeVideo(VideoView current, MediaPlayer player, String mode) {

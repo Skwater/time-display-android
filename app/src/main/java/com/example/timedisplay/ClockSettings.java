@@ -19,6 +19,10 @@ final class ClockSettings {
     static final String BACKGROUND_TYPE = "background_type";
     static final String BACKGROUND_MODE = "background_mode";
     static final String BACKGROUND_DIM = "background_dim";
+    static final String DEFAULT_BACKGROUND_OPACITY = "default_background_opacity";
+    static final String DEFAULT_BACKGROUND_INTENSITY = "default_background_intensity";
+    static final String DEFAULT_BACKGROUND_HUE = "default_background_hue";
+    static final String DEFAULT_BACKGROUND_SATURATION = "default_background_saturation";
     static final String BACKGROUND_SCALE = "background_scale";
     static final String BACKGROUND_PAN_X = "background_pan_x";
     static final String BACKGROUND_PAN_Y = "background_pan_y";
@@ -52,6 +56,14 @@ final class ClockSettings {
         float hue = bounded(prefs.getInt(FONT_HUE, 0), 360);
         float saturation = bounded(prefs.getInt(FONT_SATURATION, 0), 100) / 100f;
         float intensity = bounded(prefs.getInt(FONT_INTENSITY, 100), 100) / 100f;
+        return Color.HSVToColor(alpha, new float[]{hue, saturation, intensity});
+    }
+
+    static int defaultBackgroundColor(SharedPreferences prefs) {
+        int alpha = Math.round(255 * bounded(prefs.getInt(DEFAULT_BACKGROUND_OPACITY, 100), 100) / 100f);
+        float hue = bounded(prefs.getInt(DEFAULT_BACKGROUND_HUE, 219), 360);
+        float saturation = bounded(prefs.getInt(DEFAULT_BACKGROUND_SATURATION, 63), 100) / 100f;
+        float intensity = bounded(prefs.getInt(DEFAULT_BACKGROUND_INTENSITY, 13), 100) / 100f;
         return Color.HSVToColor(alpha, new float[]{hue, saturation, intensity});
     }
 

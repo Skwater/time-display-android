@@ -77,6 +77,9 @@ final class SettingsPanel {
     private static final String[] FONT_VALUES = {"system", "sans", "serif", "mono"};
     private static final String[] COLOR_KEYS = {ClockSettings.FONT_OPACITY,
             ClockSettings.FONT_INTENSITY, ClockSettings.FONT_HUE, ClockSettings.FONT_SATURATION};
+    private static final String[] DEFAULT_BACKGROUND_COLOR_KEYS = {
+            ClockSettings.DEFAULT_BACKGROUND_OPACITY, ClockSettings.DEFAULT_BACKGROUND_INTENSITY,
+            ClockSettings.DEFAULT_BACKGROUND_HUE, ClockSettings.DEFAULT_BACKGROUND_SATURATION};
 
     private final MainActivity host;
     private final SharedPreferences prefs;
@@ -86,6 +89,7 @@ final class SettingsPanel {
     private final List<SeekBar> sliders = new ArrayList<>();
     private final List<Switch> switches = new ArrayList<>();
     private final List<SeekBar> colorSliders = new ArrayList<>();
+    private final List<SeekBar> defaultBackgroundColorSliders = new ArrayList<>();
     private LinearLayout content;
     private TextView backgroundInfo;
     private TextView brightnessInfo;
@@ -93,7 +97,9 @@ final class SettingsPanel {
     private TextView fontMenuLabel;
     private TextView colorHeaderLabel;
     private View colorPreview;
+    private View defaultBackgroundColorPreview;
     private LinearLayout colorControls;
+    private LinearLayout defaultBackgroundColorControls;
     private PopupWindow fontPopup;
     private ScrollView customizationPanel;
     private LinearLayout customizationHome;
@@ -136,6 +142,7 @@ final class SettingsPanel {
         }
         refreshColorThumbs();
         refreshColorTracks();
+        refreshDefaultBackgroundColorTracks();
     }
 
     ScrollView createSettingsPanel() {
@@ -187,6 +194,7 @@ final class SettingsPanel {
         customizationPanel = panel;
         hint(t("向右滑动或点击面板外侧关闭", "Swipe right or tap outside to close"));
         section(t("背景", "Background"));
+        createDefaultBackgroundColorControls();
         backgroundSourceSpinner = spinner(t("背景来源", "Background source"),
                 new String[]{t("单个背景", "Single background"), t("播放列表", "Playlist")},
                 SOURCE_VALUES, ClockSettings.BACKGROUND_SOURCE, "single");
@@ -847,12 +855,50 @@ final class SettingsPanel {
         refreshColorThumbs();
     }
 
+    private void createDefaultBackgroundColorControls() {
+        LinearLayout header = new LinearLayout(host);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        TextView headerLabel = label(t("默认背景颜色 ▸", "Default background color ▸"), 18);
+        header.addView(headerLabel, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        defaultBackgroundColorPreview = new View(host);
+        LinearLayout.LayoutParams swatch = new LinearLayout.LayoutParams(dp(24), dp(24));
+        swatch.rightMargin = dp(8);
+        header.addView(defaultBackgroundColorPreview, swatch);
+        content.addView(header);
+        defaultBackgroundColorControls = new LinearLayout(host);
+        defaultBackgroundColorControls.setOrientation(LinearLayout.VERTICAL);
+        defaultBackgroundColorControls.setVisibility(View.GONE);
+        content.addView(defaultBackgroundColorControls);
+        header.setOnClickListener(v -> {
+            boolean open = defaultBackgroundColorControls.getVisibility() != View.VISIBLE;
+            defaultBackgroundColorControls.setVisibility(open ? View.VISIBLE : View.GONE);
+            headerLabel.setText(open ? t("默认背景颜色 ▾", "Default background color ▾")
+                    : t("默认背景颜色 ▸", "Default background color ▸"));
+        });
+        String[] labels = colorLabels();
+        int[] defaults = {100, 13, 219, 63};
+        for (int i = 0; i < DEFAULT_BACKGROUND_COLOR_KEYS.length; i++) {
+            addColorSlider(labels[i], DEFAULT_BACKGROUND_COLOR_KEYS[i], i == 2 ? 360 : 100,
+                    defaults[i], defaultBackgroundColorControls, defaultBackgroundColorSliders,
+                    this::refreshDefaultBackgroundColorTracks);
+        }
+        refreshDefaultBackgroundColorTracks();
+        refreshColorThumbs();
+    }
+
     private String[] colorLabels() {
         return new String[]{t("透明度：", "Opacity:"), t("颜色强度：", "Intensity:"),
                 t("颜色：", "Hue:"), t("饱和：", "Saturation:")};
     }
 
     private void addColorSlider(String title, String key, int maximum, int fallback) {
+        addColorSlider(title, key, maximum, fallback, colorControls, colorSliders,
+                this::refreshColorTracks);
+    }
+
+    private void addColorSlider(String title, String key, int maximum, int fallback,
+                                LinearLayout destination, List<SeekBar> group, Runnable refresh) {
         LinearLayout row = new LinearLayout(host);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -872,7 +918,7 @@ final class SettingsPanel {
             @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                 if (fromUser) {
                     prefs.edit().putInt(key, progress).apply();
-                    refreshColorTracks();
+                    refresh.run();
                     host.onSettingChanged(key);
                 }
             }
@@ -880,8 +926,8 @@ final class SettingsPanel {
             @Override public void onStopTrackingTouch(SeekBar bar) { }
         });
         row.addView(slider, new LinearLayout.LayoutParams(0, dp(44), 1f));
-        colorControls.addView(row, new LinearLayout.LayoutParams(-1, dp(44)));
-        colorSliders.add(slider);
+        destination.addView(row, new LinearLayout.LayoutParams(-1, dp(44)));
+        group.add(slider);
     }
 
     private void refreshColorTracks() {
@@ -909,9 +955,43 @@ final class SettingsPanel {
         }
     }
 
+    private void refreshDefaultBackgroundColorTracks() {
+        if (defaultBackgroundColorSliders.size() != 4) return;
+        int hue = Math.max(0, Math.min(360,
+                prefs.getInt(ClockSettings.DEFAULT_BACKGROUND_HUE, 219)));
+        float saturation = Math.max(0, Math.min(100,
+                prefs.getInt(ClockSettings.DEFAULT_BACKGROUND_SATURATION, 63))) / 100f;
+        float intensity = Math.max(0, Math.min(100,
+                prefs.getInt(ClockSettings.DEFAULT_BACKGROUND_INTENSITY, 13))) / 100f;
+        int solid = Color.HSVToColor(new float[]{hue, saturation, intensity});
+        setColorTrack(defaultBackgroundColorSliders.get(0), new int[]{Color.TRANSPARENT, solid});
+        setColorTrack(defaultBackgroundColorSliders.get(1), new int[]{Color.BLACK,
+                Color.HSVToColor(new float[]{hue, saturation, 1f})});
+        setColorTrack(defaultBackgroundColorSliders.get(2), new int[]{Color.RED, Color.YELLOW,
+                Color.GREEN, Color.CYAN, Color.BLUE, Color.MAGENTA, Color.RED});
+        setColorTrack(defaultBackgroundColorSliders.get(3), new int[]{
+                Color.HSVToColor(new float[]{hue, 0f, intensity}),
+                Color.HSVToColor(new float[]{hue, 1f, intensity})});
+        if (defaultBackgroundColorPreview != null) {
+            GradientDrawable swatch = new GradientDrawable();
+            swatch.setColor(ClockSettings.defaultBackgroundColor(prefs));
+            swatch.setCornerRadius(dp(4));
+            swatch.setStroke(dp(1), Color.WHITE);
+            defaultBackgroundColorPreview.setBackground(swatch);
+        }
+    }
+
     private void refreshColorThumbs() {
         int accent = UiPalette.accent(host);
         for (SeekBar slider : colorSliders) {
+            GradientDrawable thumb = new GradientDrawable();
+            thumb.setColor(accent);
+            thumb.setCornerRadius(dp(4));
+            thumb.setSize(dp(12), dp(22));
+            slider.setThumb(thumb);
+            slider.setThumbTintList(null);
+        }
+        for (SeekBar slider : defaultBackgroundColorSliders) {
             GradientDrawable thumb = new GradientDrawable();
             thumb.setColor(accent);
             thumb.setCornerRadius(dp(4));
