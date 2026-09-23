@@ -21,10 +21,31 @@ import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 final class PlaylistStore {
+    private static final Object IMAGE_FILES_LOCK = new Object();
+    private static final AtomicBoolean STARTUP_CLEANUP_SCHEDULED = new AtomicBoolean();
+
+    static void scheduleStartupCleanup(Context context) {
+        if (!STARTUP_CLEANUP_SCHEDULED.compareAndSet(false, true)) return;
+        Context appContext = context.getApplicationContext();
+        new Thread(() -> {
+            PlaylistStore store = new PlaylistStore(appContext);
+            try {
+                store.cleanupOrphanFiles();
+            } catch (Exception ignored) {
+                // Try again on the next process start.
+            } finally {
+                try { store.helper.close(); } catch (Exception ignored) { }
+            }
+        }, "playlist-orphan-cleanup").start();
+    }
+
     static final class Entry {
         final String id, uri, type, name, grantUri;
         Entry(String id, String uri, String type, String name, String grantUri) {
@@ -171,21 +192,70 @@ final class PlaylistStore {
         return addLinkedImageTo(activeId(), source, name, null);
     }
     Entry addLinkedImageTo(long listId, Uri source, String name, Uri treeGrant) throws Exception {
-        Bitmap preview = ensureThumbnail(source);
-        preview.recycle();
-        Entry entry = new Entry(UUID.randomUUID().toString(), source.toString(), "image", name,
-                treeGrant == null ? "" : treeGrant.toString());
-        if (!insert(listId, entry)) throw new IllegalStateException("could not save image");
-        return entry;
+        synchronized (IMAGE_FILES_LOCK) {
+            Bitmap preview = ensureThumbnail(source);
+            preview.recycle();
+            Entry entry = new Entry(UUID.randomUUID().toString(), source.toString(), "image", name,
+                    treeGrant == null ? "" : treeGrant.toString());
+            if (!insert(listId, entry)) throw new IllegalStateException("could not save image");
+            return entry;
+        }
     }
 
     Bitmap thumbnail(Entry entry) {
-        try {
-            File file = thumbnailFile(entry.uri);
-            Bitmap cached = BitmapFactory.decodeFile(file.getAbsolutePath());
-            return cached != null ? cached : ensureThumbnail(Uri.parse(entry.uri));
-        } catch (Exception ignored) {
-            return null;
+        synchronized (IMAGE_FILES_LOCK) {
+            try {
+                File file = thumbnailFile(entry.uri);
+                Bitmap cached = BitmapFactory.decodeFile(file.getAbsolutePath());
+                return cached != null ? cached : ensureThumbnail(Uri.parse(entry.uri));
+            } catch (Exception ignored) {
+                return null;
+            }
+        }
+    }
+
+    private void cleanupOrphanFiles() throws Exception {
+        synchronized (IMAGE_FILES_LOCK) {
+            File legacyDirectory = new File(context.getFilesDir(), "playlist-images").getCanonicalFile();
+            Set<String> referencedThumbnails = new HashSet<>();
+            Set<String> referencedLegacyImages = new HashSet<>();
+            try (Cursor cursor = helper.getReadableDatabase().rawQuery(
+                    "SELECT DISTINCT uri FROM items WHERE type='image'", null)) {
+                while (cursor.moveToNext()) {
+                    String uriText = cursor.getString(0);
+                    if (uriText == null) continue;
+                    referencedThumbnails.add(thumbnailFile(uriText).getName());
+                    try {
+                        Uri uri = Uri.parse(uriText);
+                        if (!"file".equals(uri.getScheme()) || uri.getPath() == null) continue;
+                        File file = new File(uri.getPath()).getCanonicalFile();
+                        if (legacyDirectory.equals(file.getParentFile()))
+                            referencedLegacyImages.add(file.getName());
+                    } catch (Exception ignored) { }
+                }
+            }
+            String singleBackground = prefs.getString(ClockSettings.BACKGROUND_URI, "");
+            if (singleBackground != null && !singleBackground.isEmpty()) {
+                try {
+                    Uri uri = Uri.parse(singleBackground);
+                    if ("file".equals(uri.getScheme()) && uri.getPath() != null) {
+                        File file = new File(uri.getPath()).getCanonicalFile();
+                        if (legacyDirectory.equals(file.getParentFile()))
+                            referencedLegacyImages.add(file.getName());
+                    }
+                } catch (Exception ignored) { }
+            }
+            deleteUnreferenced(new File(context.getFilesDir(), "playlist-thumbnails"),
+                    referencedThumbnails);
+            deleteUnreferenced(legacyDirectory, referencedLegacyImages);
+        }
+    }
+
+    private void deleteUnreferenced(File directory, Set<String> referenced) {
+        File[] files = directory.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            if (file.isFile() && !referenced.contains(file.getName())) file.delete();
         }
     }
 
@@ -345,13 +415,17 @@ final class PlaylistStore {
     }
 
     private void cleanupIfUnused(SQLiteDatabase db, Entry entry) {
-        if ("image".equals(entry.type) && !used(db, "uri", entry.uri)) {
-            try {
-                thumbnailFile(entry.uri).delete();
-                File directory = new File(context.getFilesDir(), "playlist-images").getCanonicalFile();
-                File file = new File(Uri.parse(entry.uri).getPath()).getCanonicalFile();
-                if (directory.equals(file.getParentFile())) file.delete();
-            } catch (Exception ignored) { }
+        if ("image".equals(entry.type)) {
+            synchronized (IMAGE_FILES_LOCK) {
+                if (used(db, "uri", entry.uri)) return;
+                try {
+                    thumbnailFile(entry.uri).delete();
+                    File directory = new File(context.getFilesDir(), "playlist-images").getCanonicalFile();
+                    File file = new File(Uri.parse(entry.uri).getPath()).getCanonicalFile();
+                    if (directory.equals(file.getParentFile()) && !entry.uri.equals(
+                            prefs.getString(ClockSettings.BACKGROUND_URI, ""))) file.delete();
+                } catch (Exception ignored) { }
+            }
         }
         if (!used(db, "uri", entry.uri)) {
             String grant = entry.grantUri.isEmpty() ? entry.uri : entry.grantUri;

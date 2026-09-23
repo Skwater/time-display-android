@@ -147,6 +147,7 @@ public final class MainActivity extends Activity {
                 });
         setContentView(root);
         root.post(this::applyImmersiveMode);
+        PlaylistStore.scheduleStartupCleanup(getApplicationContext());
 
         root.post(() -> {
             int width = Math.min(dp(340), Math.round(root.getWidth() * 0.82f));
