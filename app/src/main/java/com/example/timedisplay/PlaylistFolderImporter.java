@@ -53,7 +53,7 @@ final class PlaylistFolderImporter {
         visitTree(context, treeUri, result, (uri, name, type) -> {
             result.recognized++;
             try {
-                if ("image".equals(type)) store.addImageTo(playlistId, uri, name);
+                if ("image".equals(type)) store.addLinkedImageTo(playlistId, uri, name, treeUri);
                 else store.addVideoTo(playlistId, uri, name, treeUri);
                 result.added++;
             } catch (Exception error) {

@@ -7,15 +7,19 @@ import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.ImageDecoder;
 import android.net.Uri;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.File;
-import java.io.InputStream;
+import java.io.FileOutputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -163,27 +167,59 @@ final class PlaylistStore {
         return entriesFor(helper.getReadableDatabase(), activeId(), offset, limit);
     }
 
-    Entry addImage(Uri source, String name) throws Exception { return addImageTo(activeId(), source, name); }
-    Entry addImageTo(long listId, Uri source, String name) throws Exception {
-        File directory = new File(context.getFilesDir(), "playlist-images");
-        if (!directory.isDirectory() && !directory.mkdirs()) throw new IllegalStateException("directory unavailable");
-        String id = UUID.randomUUID().toString();
-        File target = new File(directory, id);
-        File temporary = new File(directory, id + ".tmp");
+    Entry addLinkedImage(Uri source, String name) throws Exception {
+        return addLinkedImageTo(activeId(), source, name, null);
+    }
+    Entry addLinkedImageTo(long listId, Uri source, String name, Uri treeGrant) throws Exception {
+        Bitmap preview = ensureThumbnail(source);
+        preview.recycle();
+        Entry entry = new Entry(UUID.randomUUID().toString(), source.toString(), "image", name,
+                treeGrant == null ? "" : treeGrant.toString());
+        if (!insert(listId, entry)) throw new IllegalStateException("could not save image");
+        return entry;
+    }
+
+    Bitmap thumbnail(Entry entry) {
         try {
-            try (InputStream input = context.getContentResolver().openInputStream(source)) {
-                if (input == null) throw new IllegalArgumentException("image unavailable");
-                Files.copy(input, temporary.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            }
-            Files.move(temporary.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            Entry entry = new Entry(id, Uri.fromFile(target).toString(), "image", name, "");
-            if (!insert(listId, entry)) throw new IllegalStateException("could not save image");
-            return entry;
-        } catch (Exception error) {
-            temporary.delete();
-            target.delete();
-            throw error;
+            File file = thumbnailFile(entry.uri);
+            Bitmap cached = BitmapFactory.decodeFile(file.getAbsolutePath());
+            return cached != null ? cached : ensureThumbnail(Uri.parse(entry.uri));
+        } catch (Exception ignored) {
+            return null;
         }
+    }
+
+    private Bitmap ensureThumbnail(Uri uri) throws Exception {
+        File file = thumbnailFile(uri.toString());
+        Bitmap cached = BitmapFactory.decodeFile(file.getAbsolutePath());
+        if (cached != null) return cached;
+        Bitmap bitmap = ImageDecoder.decodeBitmap(ImageDecoder.createSource(context.getContentResolver(), uri),
+                (decoder, info, source) -> {
+                    int width = info.getSize().getWidth();
+                    int height = info.getSize().getHeight();
+                    float ratio = Math.min(1f, 128f / Math.max(width, height));
+                    decoder.setTargetSize(Math.max(1, Math.round(width * ratio)),
+                            Math.max(1, Math.round(height * ratio)));
+                });
+        File directory = file.getParentFile();
+        if (directory != null && (directory.isDirectory() || directory.mkdirs())) {
+            File temp = new File(directory, file.getName() + ".tmp");
+            try (FileOutputStream output = new FileOutputStream(temp)) {
+                if (bitmap.compress(Bitmap.CompressFormat.JPEG, 82, output)) {
+                    Files.move(temp.toPath(), file.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                }
+            } finally {
+                temp.delete();
+            }
+        }
+        return bitmap;
+    }
+
+    private File thumbnailFile(String uri) throws Exception {
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(uri.getBytes("UTF-8"));
+        StringBuilder name = new StringBuilder();
+        for (byte value : digest) name.append(String.format(java.util.Locale.ROOT, "%02x", value & 0xff));
+        return new File(new File(context.getFilesDir(), "playlist-thumbnails"), name + ".jpg");
     }
 
     Entry addVideo(Uri source, String name) { return addVideoTo(activeId(), source, name, null); }
@@ -244,6 +280,7 @@ final class PlaylistStore {
     }
 
     boolean usesTree(Uri treeUri) { return used(helper.getReadableDatabase(), "grant_uri", treeUri.toString()); }
+    boolean usesUri(Uri uri) { return used(helper.getReadableDatabase(), "uri", uri.toString()); }
 
     private boolean insert(long listId, Entry entry) {
         SQLiteDatabase db = helper.getWritableDatabase();
@@ -310,15 +347,17 @@ final class PlaylistStore {
     private void cleanupIfUnused(SQLiteDatabase db, Entry entry) {
         if ("image".equals(entry.type) && !used(db, "uri", entry.uri)) {
             try {
+                thumbnailFile(entry.uri).delete();
                 File directory = new File(context.getFilesDir(), "playlist-images").getCanonicalFile();
                 File file = new File(Uri.parse(entry.uri).getPath()).getCanonicalFile();
                 if (directory.equals(file.getParentFile())) file.delete();
             } catch (Exception ignored) { }
-        } else if ("video".equals(entry.type)) {
+        }
+        if (!used(db, "uri", entry.uri)) {
             String grant = entry.grantUri.isEmpty() ? entry.uri : entry.grantUri;
             if (!entry.grantUri.isEmpty() && used(db, "grant_uri", grant)) return;
-            if (entry.grantUri.isEmpty() && (used(db, "uri", entry.uri)
-                    || entry.uri.equals(prefs.getString(ClockSettings.BACKGROUND_URI, "")))) return;
+            if (entry.grantUri.isEmpty() && entry.uri.equals(prefs.getString(
+                    ClockSettings.BACKGROUND_URI, ""))) return;
             try {
                 context.getContentResolver().releasePersistableUriPermission(Uri.parse(grant),
                         Intent.FLAG_GRANT_READ_URI_PERMISSION);

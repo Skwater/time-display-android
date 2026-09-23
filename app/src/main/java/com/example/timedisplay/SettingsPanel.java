@@ -9,7 +9,6 @@ import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
-import android.graphics.ImageDecoder;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -108,6 +107,7 @@ final class SettingsPanel {
     private Spinner backgroundSourceSpinner;
     private LinearLayout singleBackgroundControls;
     private Button folderButton;
+    private Button playlistPauseButton;
     private boolean folderImporting;
 
     SettingsPanel(MainActivity host) {
@@ -282,6 +282,7 @@ final class SettingsPanel {
         playlistPage.setVisibility(View.VISIBLE);
         refreshSavedLists();
         refreshPlaylistList();
+        refreshPlaylistPauseButton();
         customizationPanel.scrollTo(0, 0);
     }
 
@@ -314,6 +315,12 @@ final class SettingsPanel {
         pageRoot.addView(playlistPage);
         content = playlistPage;
         button(t("‹ 返回自定义", "‹ Back to customize"), v -> showCustomizationHome());
+        playlistPauseButton = createButton("", v -> {
+            host.togglePlaylistPause();
+            refreshPlaylistPauseButton();
+        });
+        content.addView(playlistPauseButton, new LinearLayout.LayoutParams(-1, dp(48)));
+        refreshPlaylistPauseButton();
         section(t("播放列表", "Playlist"));
         content.addView(label(t("选择并编辑已保存列表", "Select and edit a saved playlist"), 16));
         savedPlaylistSpinner = new Spinner(host);
@@ -462,12 +469,33 @@ final class SettingsPanel {
             if (lists.get(i).id == playlist.activeId()) selected = i;
         }
         refreshingSavedLists = true;
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(host,
-                android.R.layout.simple_spinner_item, names);
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(host,
+                android.R.layout.simple_spinner_item, names) {
+            @Override public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                TextView view = (TextView) super.getView(position, convertView, parent);
+                view.setTextColor(Color.WHITE);
+                return view;
+            }
+            @Override public View getDropDownView(int position, View convertView,
+                                                   android.view.ViewGroup parent) {
+                TextView view = (TextView) super.getDropDownView(position, convertView, parent);
+                view.setTextColor(Color.BLACK);
+                return view;
+            }
+        };
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         savedPlaylistSpinner.setAdapter(adapter);
         savedPlaylistSpinner.setSelection(selected);
+        savedPlaylistSpinner.setBackgroundTintList(ColorStateList.valueOf(Color.WHITE));
         savedPlaylistSpinner.post(() -> refreshingSavedLists = false);
+    }
+
+    void refreshPlaylistPauseButton() {
+        if (playlistPauseButton != null) {
+            playlistPauseButton.setText(host.isPlaylistPaused()
+                    ? t("继续播放", "Resume playlist") : t("暂停播放", "Pause playlist"));
+            playlistPauseButton.setEnabled(host.isPlaylistActive());
+        }
     }
 
     private void askPlaylistName(String initial, boolean copy) {
@@ -927,18 +955,9 @@ final class SettingsPanel {
             if ("image".equals(entry.type)) {
                 ImageView thumbnail = new ImageView(host);
                 thumbnail.setScaleType(ImageView.ScaleType.CENTER_CROP);
-                try {
-                    thumbnail.setImageBitmap(ImageDecoder.decodeBitmap(ImageDecoder.createSource(
-                            host.getContentResolver(), Uri.parse(entry.uri)), (decoder, info, source) -> {
-                        int width = info.getSize().getWidth();
-                        int height = info.getSize().getHeight();
-                        float ratio = Math.min(1f, dp(48) / (float) Math.max(width, height));
-                        decoder.setTargetSize(Math.max(1, Math.round(width * ratio)),
-                                Math.max(1, Math.round(height * ratio)));
-                    }));
-                } catch (Exception ignored) {
-                    thumbnail.setBackgroundColor(0xFF52647A);
-                }
+                android.graphics.Bitmap preview = playlist.thumbnail(entry);
+                if (preview != null) thumbnail.setImageBitmap(preview);
+                else thumbnail.setBackgroundColor(0xFF52647A);
                 row.addView(thumbnail, new LinearLayout.LayoutParams(dp(44), dp(44)));
             } else {
                 TextView videoIcon = label("▶", 21);
@@ -1012,19 +1031,20 @@ final class SettingsPanel {
             intent.putExtra(MediaStore.EXTRA_PICK_IMAGES_MAX,
                     Math.min(20, MediaStore.getPickImagesMaxLimit()));
         } else {
-            intent = new Intent(Intent.ACTION_GET_CONTENT);
+            intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.setType("image/*");
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
         }
-        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         try {
             host.startActivityForResult(intent, PICK_PLAYLIST_IMAGES);
         } catch (ActivityNotFoundException unavailable) {
-            Intent fallback = new Intent(Intent.ACTION_GET_CONTENT);
+            Intent fallback = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             fallback.setType("image/*");
             fallback.addCategory(Intent.CATEGORY_OPENABLE);
             fallback.putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true);
+            fallback.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
             host.startActivityForResult(fallback, PICK_PLAYLIST_IMAGES);
         }
     }
@@ -1173,7 +1193,11 @@ final class SettingsPanel {
                     continue;
                 }
                 String name = displayName(uri);
-                if (image) playlist.addImage(uri, name);
+                if (image) {
+                    host.getContentResolver().takePersistableUriPermission(uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    playlist.addLinkedImage(uri, name);
+                }
                 else {
                     host.getContentResolver().takePersistableUriPermission(uri,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -1181,6 +1205,13 @@ final class SettingsPanel {
                 }
                 added++;
             } catch (Exception error) {
+                if (!playlist.usesUri(uri) && !uri.toString().equals(
+                        prefs.getString(ClockSettings.BACKGROUND_URI, ""))) {
+                    try {
+                        host.getContentResolver().releasePersistableUriPermission(uri,
+                                Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    } catch (SecurityException ignored) { }
+                }
                 failed++;
             }
         }

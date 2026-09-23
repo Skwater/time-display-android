@@ -15,6 +15,7 @@ import android.os.Bundle;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
@@ -78,6 +79,13 @@ public final class MainActivity extends Activity {
     private int playlistPosition;
     private int mediaGeneration;
     private int playlistFailures;
+    private boolean playlistPaused;
+    private boolean playlistCurrentIsImage;
+    private boolean playlistImageReady;
+    private long playlistImageDeadlineMs;
+    private long playlistImageRemainingMs;
+    private long playlistImageDurationMs;
+    private MediaPlayer currentVideoPlayer;
     private String requestedPlaylistId;
     private final Runnable playlistAdvance = this::advancePlaylist;
 
@@ -163,6 +171,7 @@ public final class MainActivity extends Activity {
         }
         applyOrientation();
         loadBackground(ClockSettings.of(this));
+        panels.refreshPlaylistPauseButton();
         handler.removeCallbacks(tick);
         tick.run();
     }
@@ -263,7 +272,35 @@ public final class MainActivity extends Activity {
                 || ClockSettings.PLAYLIST_SHUFFLE.equals(key)
                 || ClockSettings.PLAYLIST_LOOP.equals(key)
                 || ClockSettings.PLAYLIST_INTERVAL.equals(key);
-        if (playlistSetting && !playlistPlayback) return;
+        if (playlistSetting && !playlistPlayback && !"playlist".equals(ClockSettings.of(this)
+                .getString(ClockSettings.BACKGROUND_SOURCE, "single"))) return;
+        if (ClockSettings.PLAYLIST_IMAGE_MODE.equals(key)) {
+            if (playlistCurrentIsImage) applyBackgroundMatrix();
+            return;
+        }
+        if (ClockSettings.PLAYLIST_VIDEO_MODE.equals(key)) {
+            if (video != null && currentVideoPlayer != null) sizeVideo(video, currentVideoPlayer,
+                    ClockSettings.of(this).getString(ClockSettings.PLAYLIST_VIDEO_MODE, "fill"));
+            return;
+        }
+        if (ClockSettings.PLAYLIST_FADE.equals(key)) return;
+        if (ClockSettings.PLAYLIST_LOOP.equals(key)) {
+            if (currentVideoPlayer != null && playlistItems.size() == 1)
+                currentVideoPlayer.setLooping(ClockSettings.of(this)
+                        .getBoolean(ClockSettings.PLAYLIST_LOOP, true));
+            return;
+        }
+        if (ClockSettings.PLAYLIST_INTERVAL.equals(key)) {
+            updatePlaylistImageInterval();
+            return;
+        }
+        if (ClockSettings.PLAYLIST_SHUFFLE.equals(key)) {
+            updateRemainingPlaylistOrder(ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_SHUFFLE, false));
+            return;
+        }
+        if (ClockSettings.PLAYLIST_ITEMS.equals(key) && playlistPlayback && !playlistOrder.isEmpty()) {
+            requestedPlaylistId = playlistItems.get(playlistOrder.get(playlistPosition)).id;
+        }
         if (ClockSettings.BACKGROUND_URI.equals(key) || ClockSettings.BACKGROUND_MODE.equals(key)
                 || ClockSettings.BACKGROUND_TYPE.equals(key)
                 || ClockSettings.BACKGROUND_SOURCE.equals(key)
@@ -274,13 +311,64 @@ public final class MainActivity extends Activity {
                 || ClockSettings.PLAYLIST_SHUFFLE.equals(key)
                 || ClockSettings.PLAYLIST_LOOP.equals(key)
                 || ClockSettings.PLAYLIST_INTERVAL.equals(key)) loadBackground(ClockSettings.of(this));
+        if ((ClockSettings.BACKGROUND_SOURCE.equals(key) || ClockSettings.PLAYLIST_ITEMS.equals(key))
+                && panels != null)
+            panels.refreshPlaylistPauseButton();
+    }
+
+    boolean isPlaylistPaused() { return playlistPaused; }
+    boolean isPlaylistActive() { return playlistPlayback; }
+
+    void togglePlaylistPause() {
+        if (!playlistPlayback) return;
+        playlistPaused = !playlistPaused;
+        if (playlistPaused) {
+            fadeCover.animate().cancel();
+            fadeCover.setAlpha(0f);
+            if (playlistCurrentIsImage) {
+                if (playlistImageReady) playlistImageRemainingMs = Math.max(1,
+                        playlistImageDeadlineMs - SystemClock.uptimeMillis());
+                handler.removeCallbacks(playlistAdvance);
+                if (animation != null) animation.stop();
+            }
+            if (video != null && video.isPlaying()) video.pause();
+        } else {
+            if (playlistCurrentIsImage) {
+                if (animation != null) animation.start();
+                schedulePlaylistImageAdvance();
+            }
+            if (video != null) video.start();
+        }
+    }
+
+    private void updateRemainingPlaylistOrder(boolean shuffle) {
+        if (!playlistPlayback || playlistOrder.size() < 2) return;
+        List<Integer> remaining = new ArrayList<>(playlistOrder.subList(playlistPosition + 1,
+                playlistOrder.size()));
+        if (shuffle) Collections.shuffle(remaining);
+        else Collections.sort(remaining);
+        for (int i = 0; i < remaining.size(); i++)
+            playlistOrder.set(playlistPosition + 1 + i, remaining.get(i));
+    }
+
+    private void updatePlaylistImageInterval() {
+        if (!playlistPlayback || !playlistCurrentIsImage || !playlistImageReady) return;
+        long remaining = playlistPaused ? playlistImageRemainingMs
+                : Math.max(0, playlistImageDeadlineMs - SystemClock.uptimeMillis());
+        long elapsed = Math.max(0, playlistImageDurationMs - remaining);
+        playlistImageDurationMs = Math.max(3, Math.min(60, ClockSettings.of(this)
+                .getInt(ClockSettings.PLAYLIST_INTERVAL, 10))) * 1000L;
+        playlistImageRemainingMs = Math.max(1, playlistImageDurationMs - elapsed);
+        if (!playlistPaused) schedulePlaylistImageAdvance();
     }
 
     void playPlaylistEntry(String id) {
         requestedPlaylistId = id;
+        playlistPaused = false;
         SharedPreferences prefs = ClockSettings.of(this);
         prefs.edit().putString(ClockSettings.BACKGROUND_SOURCE, "playlist").apply();
         loadBackground(prefs);
+        panels.refreshPlaylistPauseButton();
     }
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
@@ -529,6 +617,7 @@ public final class MainActivity extends Activity {
         fadeCover.animate().cancel();
         fadeCover.setAlpha(0f);
         playlistPlayback = "playlist".equals(prefs.getString(ClockSettings.BACKGROUND_SOURCE, "single"));
+        if (!playlistPlayback) playlistPaused = false;
         playlistItems = playlistPlayback ? new PlaylistStore(this).entries() : new ArrayList<>();
         playlistOrder.clear();
         playlistPosition = 0;
@@ -565,6 +654,12 @@ public final class MainActivity extends Activity {
     private void clearCurrentMedia() {
         mediaGeneration++;
         handler.removeCallbacks(playlistAdvance);
+        playlistCurrentIsImage = false;
+        playlistImageReady = false;
+        playlistImageRemainingMs = 0;
+        playlistImageDurationMs = 0;
+        playlistImageDeadlineMs = 0;
+        currentVideoPlayer = null;
         if (video != null) {
             video.stopPlayback();
             root.removeView(video);
@@ -603,6 +698,7 @@ public final class MainActivity extends Activity {
                 current.setVideoURI(uri);
                 current.setOnPreparedListener(player -> {
                     if (video != current || !active || mediaGeneration != generation) return;
+                    currentVideoPlayer = player;
                     player.setLooping(!playlistPlayback || (playlistItems.size() == 1
                             && ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_LOOP, true)));
                     player.setVolume(0, 0);
@@ -617,6 +713,7 @@ public final class MainActivity extends Activity {
                         });
                     }
                     current.start();
+                    if (playlistPlayback && playlistPaused) current.pause();
                     handler.postDelayed(() -> revealMedia(generation), 1200);
                 });
                 current.setOnErrorListener((player, what, extra) -> {
@@ -635,16 +732,21 @@ public final class MainActivity extends Activity {
                     if (mediaGeneration != generation) return;
                     applyBackgroundMatrix();
                     revealMedia(generation);
+                    playlistImageReady = true;
                     if (playlistPlayback && playlistItems.size() > 1) {
                         int seconds = Math.max(3, Math.min(60, ClockSettings.of(this)
                                 .getInt(ClockSettings.PLAYLIST_INTERVAL, 10)));
-                        handler.postDelayed(playlistAdvance, seconds * 1000L);
+                        playlistImageDurationMs = seconds * 1000L;
+                        playlistImageRemainingMs = playlistImageDurationMs;
+                        if (!playlistPaused) schedulePlaylistImageAdvance();
                     }
                 });
+                playlistCurrentIsImage = playlistPlayback;
                 if (drawable instanceof AnimatedImageDrawable) {
                     animation = (AnimatedImageDrawable) drawable;
                     animation.setRepeatCount(AnimatedImageDrawable.REPEAT_INFINITE);
                     animation.start();
+                    if (playlistPaused) animation.stop();
                 }
             }
         } catch (Exception error) {
@@ -667,7 +769,7 @@ public final class MainActivity extends Activity {
     }
 
     private void advancePlaylist() {
-        if (!playlistPlayback || !active || playlistItems.size() < 2) return;
+        if (!playlistPlayback || !active || playlistPaused || playlistItems.size() < 2) return;
         if (playlistPosition + 1 >= playlistOrder.size()
                 && !ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_LOOP, true)) return;
         if (ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_FADE, true)) {
@@ -677,6 +779,15 @@ public final class MainActivity extends Activity {
                 if (mediaGeneration == generation && active) showNextPlaylistItem();
             }).start();
         } else showNextPlaylistItem();
+    }
+
+    private void schedulePlaylistImageAdvance() {
+        handler.removeCallbacks(playlistAdvance);
+        if (!playlistPlayback || playlistPaused || !playlistCurrentIsImage || !playlistImageReady
+                || playlistItems.size() < 2)
+            return;
+        playlistImageDeadlineMs = SystemClock.uptimeMillis() + Math.max(1, playlistImageRemainingMs);
+        handler.postAtTime(playlistAdvance, playlistImageDeadlineMs);
     }
 
     private void showNextPlaylistItem() {
