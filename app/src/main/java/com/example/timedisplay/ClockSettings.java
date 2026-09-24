@@ -13,6 +13,7 @@ final class ClockSettings {
     static final String SHOW_DATE = "show_date";
     static final String SHOW_LUNAR = "show_lunar";
     static final String SHOW_SECONDS = "show_seconds";
+    static final String TIME_FORMAT = "time_format";
     static final String TEXT_SHADOW = "text_shadow";
     static final String FONT_BOLD = "font_bold";
     static final String BACKGROUND_URI = "background_uri";

@@ -15,6 +15,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.provider.OpenableColumns;
 import android.provider.MediaStore;
+import android.text.Editable;
+import android.text.TextUtils;
+import android.text.TextWatcher;
 import android.view.MotionEvent;
 import android.view.DragEvent;
 import android.view.View;
@@ -25,6 +28,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.PopupWindow;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -41,8 +45,12 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.TimeZone;
 
 final class SettingsPanel {
     private static final int PICK_IMAGE = 1;
@@ -74,6 +82,7 @@ final class SettingsPanel {
     private static final String[] VIDEO_MODE_VALUES = {"fill", "fit", "stretch"};
     private static final String[] SOURCE_VALUES = {"single", "playlist"};
     private static final String[] LANGUAGE_VALUES = {"system", "zh", "en"};
+    private static final String[] TIME_FORMAT_VALUES = {"12", "24"};
     private static final String[] FONT_VALUES = {"system", "sans", "serif", "mono"};
     private static final String[] COLOR_KEYS = {ClockSettings.FONT_OPACITY,
             ClockSettings.FONT_INTENSITY, ClockSettings.FONT_HUE, ClockSettings.FONT_SATURATION};
@@ -95,6 +104,7 @@ final class SettingsPanel {
     private TextView brightnessInfo;
     private TextView fontInfo;
     private TextView fontMenuLabel;
+    private Button selectedZoneButton;
     private TextView colorHeaderLabel;
     private View colorPreview;
     private View defaultBackgroundColorPreview;
@@ -153,7 +163,18 @@ final class SettingsPanel {
                 new String[]{t("跟随系统", "Follow system"), "中文", "English"},
                 LANGUAGE_VALUES, ClockSettings.LANGUAGE, "system");
         section(t("时间与日期", "Time and date"));
-        spinner(t("显示时区", "Time zone"), zoneLabels(), ZONES, ClockSettings.ZONE, "SYSTEM");
+        spinner(t("时间格式", "Time format"),
+                new String[]{t("12 小时制（AM/PM）", "12-hour (AM/PM)"),
+                        t("24 小时制", "24-hour")},
+                TIME_FORMAT_VALUES, ClockSettings.TIME_FORMAT, "12");
+        content.addView(label(t("时区", "Time zone"), 16));
+        selectedZoneButton = createButton("", v -> showZonePicker());
+        selectedZoneButton.setSingleLine(true);
+        selectedZoneButton.setEllipsize(TextUtils.TruncateAt.END);
+        refreshSelectedZone();
+        LinearLayout.LayoutParams zoneParams = new LinearLayout.LayoutParams(-1, dp(52));
+        zoneParams.topMargin = dp(6);
+        content.addView(selectedZoneButton, zoneParams);
         toggle(t("显示时区文字", "Show time zone"), ClockSettings.SHOW_ZONE, true);
         toggle(t("显示公历日期和星期", "Show date and weekday"), ClockSettings.SHOW_DATE, true);
         toggle(t("显示中国农历", "Show Chinese lunar date"), ClockSettings.SHOW_LUNAR, false);
@@ -590,27 +611,116 @@ final class SettingsPanel {
         return panel;
     }
 
-    private String[] zoneLabels() {
-        String[] labels = new String[ZONES.length];
+    private void refreshSelectedZone() {
+        String id = prefs.getString(ClockSettings.ZONE, "SYSTEM");
+        selectedZoneButton.setText(t("时区：", "Zone: ")
+                + zoneLabel(id, Instant.now()).split(" · ")[0]);
+    }
+
+    private void showZonePicker() {
+        LinkedHashSet<String> zoneIds = new LinkedHashSet<>();
+        Collections.addAll(zoneIds, ZONES);
+        List<String> remaining = new ArrayList<>(ZoneId.getAvailableZoneIds());
+        Collections.sort(remaining);
+        zoneIds.addAll(remaining);
+        List<String> allIds = new ArrayList<>(zoneIds);
+        List<String> allLabels = new ArrayList<>(allIds.size());
         Instant now = Instant.now();
-        for (int i = 0; i < ZONES.length; i++) {
-            String id = ZONES[i];
-            String name = "SYSTEM".equals(id) ? t("跟随系统", "Follow system")
-                    : "UTC".equals(id) ? "UTC"
-                    : id.substring(id.lastIndexOf('/') + 1).replace('_', ' ') + " (" + id + ")";
-            try {
-                ZoneId zone = "SYSTEM".equals(id) ? ZoneId.systemDefault() : ZoneId.of(id);
-                ZoneOffset offset = zone.getRules().getOffset(now);
-                int minutes = offset.getTotalSeconds() / 60;
-                int absolute = Math.abs(minutes);
-                String prefix = (minutes < 0 ? "-" : "+") + (absolute / 60)
-                        + (absolute % 60 == 0 ? "" : String.format(Locale.ROOT, ":%02d", absolute % 60));
-                labels[i] = prefix + "  " + name;
-            } catch (RuntimeException exception) {
-                labels[i] = name;
+        for (String id : allIds) allLabels.add(zoneLabel(id, now));
+
+        LinearLayout layout = new LinearLayout(host);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(dp(18), dp(8), dp(18), 0);
+        EditText search = new EditText(host);
+        search.setSingleLine(true);
+        search.setHint(t("搜索 +8、城市或时区名称", "Search +8, city or zone name"));
+        layout.addView(search, new LinearLayout.LayoutParams(-1, dp(52)));
+        ListView results = new ListView(host);
+        layout.addView(results, new LinearLayout.LayoutParams(-1,
+                Math.min(dp(420), Math.round(host.getResources().getDisplayMetrics().heightPixels * 0.55f))));
+        List<String> visibleIds = new ArrayList<>();
+        ArrayAdapter<String> adapter = new ArrayAdapter<String>(host,
+                android.R.layout.simple_list_item_1, new ArrayList<>()) {
+            @Override public View getView(int position, View convertView, android.view.ViewGroup parent) {
+                TextView row = (TextView) super.getView(position, convertView, parent);
+                row.setSingleLine(false);
+                row.setMaxLines(2);
+                row.setEllipsize(TextUtils.TruncateAt.END);
+                return row;
             }
+        };
+        results.setAdapter(adapter);
+        Runnable filter = () -> {
+            String query = search.getText().toString().trim().toLowerCase(Locale.ROOT);
+            String[] terms = query.isEmpty() ? new String[0] : query.split("\\s+");
+            visibleIds.clear();
+            adapter.clear();
+            List<String> visibleLabels = new ArrayList<>();
+            for (int i = 0; i < allIds.size(); i++) {
+                String searchable = allLabels.get(i).toLowerCase(Locale.ROOT);
+                String readable = searchable.replace('_', ' ');
+                boolean matches = true;
+                for (String term : terms) {
+                    if (!searchable.contains(term) && !readable.contains(term)) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) {
+                    visibleIds.add(allIds.get(i));
+                    visibleLabels.add(allLabels.get(i));
+                }
+            }
+            adapter.addAll(visibleLabels);
+            results.setSelection(0);
+        };
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {
+                filter.run();
+            }
+            @Override public void afterTextChanged(Editable text) { }
+        });
+        filter.run();
+        AlertDialog dialog = new AlertDialog.Builder(host)
+                .setTitle(t("选择时区", "Choose time zone"))
+                .setView(layout)
+                .setNegativeButton(t("取消", "Cancel"), null)
+                .create();
+        dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
+                .setTextColor(UiPalette.accent(host)));
+        results.setOnItemClickListener((parent, view, position, id) -> {
+            String selected = visibleIds.get(position);
+            prefs.edit().putString(ClockSettings.ZONE, selected).apply();
+            refreshSelectedZone();
+            host.onSettingChanged(ClockSettings.ZONE);
+            dialog.dismiss();
+        });
+        dialog.show();
+    }
+
+    private String zoneLabel(String id, Instant now) {
+        try {
+            ZoneId zone = "SYSTEM".equals(id) ? ZoneId.systemDefault() : ZoneId.of(id);
+            ZoneOffset offset = zone.getRules().getOffset(now);
+            int minutes = offset.getTotalSeconds() / 60;
+            int absolute = Math.abs(minutes);
+            String prefix = (minutes < 0 ? "-" : "+") + (absolute / 60)
+                    + (absolute % 60 == 0 ? "" : String.format(Locale.ROOT, ":%02d", absolute % 60));
+            if ("SYSTEM".equals(id)) {
+                return prefix + "  " + t("跟随系统", "Follow system") + " (" + zone.getId() + ")";
+            }
+            if ("UTC".equals(id)) return prefix + "  UTC";
+            String city = id.substring(id.lastIndexOf('/') + 1).replace('_', ' ');
+            TimeZone timeZone = TimeZone.getTimeZone(id);
+            String localName = timeZone.getDisplayName(timeZone.inDaylightTime(Date.from(now)),
+                    TimeZone.LONG, L10n.locale(host));
+            return prefix + "  " + city + " (" + id + ")"
+                    + (localName.equalsIgnoreCase(city) || localName.equalsIgnoreCase(id)
+                    ? "" : " · " + localName);
+        } catch (RuntimeException exception) {
+            return id;
         }
-        return labels;
     }
 
     private void tintSlider(SeekBar slider) {

@@ -69,7 +69,10 @@ final class ClockFaceView extends View {
         ZonedDateTime dateTime = Instant.ofEpochMilli(now).atZone(zone);
         boolean english = L10n.english(getContext());
         boolean seconds = prefs.getBoolean(ClockSettings.SHOW_SECONDS, true);
-        String time = dateTime.format(DateTimeFormatter.ofPattern(seconds ? "HH:mm:ss" : "HH:mm", Locale.ROOT));
+        boolean twelveHour = !"24".equals(prefs.getString(ClockSettings.TIME_FORMAT, "12"));
+        String time = dateTime.format(DateTimeFormatter.ofPattern(
+                twelveHour ? (seconds ? "hh:mm:ss a" : "hh:mm a")
+                        : (seconds ? "HH:mm:ss" : "HH:mm"), Locale.US));
         List<String> details = new ArrayList<>();
         if (prefs.getBoolean(ClockSettings.SHOW_ZONE, true)) {
             details.add("SYSTEM".equals(zoneId)
