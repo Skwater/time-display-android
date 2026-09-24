@@ -753,6 +753,9 @@ public final class MainActivity extends Activity {
     private void sampleStaticBackground(ImageDecoder decoder, ImageDecoder.ImageInfo info,
                                         ImageDecoder.Source source) {
         if (info.isAnimated()) return;
+        // Playlist transitions draw the current image into a software Bitmap Canvas.
+        // The decoder's default hardware Bitmap cannot be drawn on that Canvas.
+        decoder.setAllocator(ImageDecoder.ALLOCATOR_SOFTWARE);
         int maxEdge = Math.max(root.getWidth(), root.getHeight());
         if (maxEdge <= 0) {
             android.util.DisplayMetrics metrics = getResources().getDisplayMetrics();
@@ -955,7 +958,15 @@ public final class MainActivity extends Activity {
         canvas.drawColor(Color.BLACK);
         defaultBackgroundLayer.draw(canvas);
         if (video == null) {
-            image.draw(canvas);
+            try {
+                image.draw(canvas);
+            } catch (RuntimeException error) {
+                android.util.Log.w("TimeDisplay", "Cannot capture outgoing image", error);
+                frame.recycle();
+                transitionPending = false;
+                showNextPlaylistItem();
+                return;
+            }
             beginMediaTransition(frame, generation);
             return;
         }

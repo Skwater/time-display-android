@@ -28,7 +28,7 @@
 
 ## 构建与校验
 
-在项目根目录运行 `./tools/build-verify.ps1`；需要校验预期版本时可加 `-ExpectedVersion 0.9.9`。脚本离线构建 Debug APK，检查包名、版本、应用名、固定签名和 APK 对齐，再将文件复制到 `releases/`。终端只输出摘要；完整日志写在 `.tmp/`。脚本要求本机保留 `keystore.properties` 和固定 Debug 密钥，缺失时会中止，防止生成无法覆盖安装的 APK。
+在项目根目录运行 `./tools/build-verify.ps1`；需要校验预期版本时可加 `-ExpectedVersion 0.10.1`。脚本离线构建 Debug APK，检查包名、版本、应用名、固定签名和 APK 对齐，再将文件复制到 `releases/`。终端只输出摘要；完整日志写在 `.tmp/`。脚本要求本机保留 `keystore.properties` 和固定 Debug 密钥，缺失时会中止，防止生成无法覆盖安装的 APK。
 
 ## 目录
 
