@@ -26,6 +26,10 @@
 
 用 Android Studio 打开本文件夹，在 Android 9（API 28）及以上设备或模拟器运行 `app`。项目使用 Android Gradle Plugin 8.13.2 与 Gradle 8.13，无需网络权限。
 
+## 构建与校验
+
+在项目根目录运行 `./tools/build-verify.ps1`；需要校验预期版本时可加 `-ExpectedVersion 0.9.9`。脚本离线构建 Debug APK，检查包名、版本、应用名、固定签名和 APK 对齐，再将文件复制到 `releases/`。终端只输出摘要；完整日志写在 `.tmp/`。脚本要求本机保留 `keystore.properties` 和固定 Debug 密钥，缺失时会中止，防止生成无法覆盖安装的 APK。
+
 ## 目录
 
 ```text
@@ -40,6 +44,7 @@ app/src/main/java/com/example/timedisplay/
   L10n.java               应用语言选择与中英文文案
   PlaylistStore.java      背景播放列表文件和顺序管理
   PlaylistFolderImporter.java 文件夹扫描与媒体导入
+tools/build-verify.ps1    离线构建、固定签名和 APK 元数据校验
 docs/                     产品与开发文档（仅本地保留，不上传）
 .tmp/                     临时文件（不上传）
 .trash/                   垃圾回收区（不上传）
