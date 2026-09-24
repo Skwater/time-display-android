@@ -70,8 +70,10 @@ final class ClockFaceView extends View {
         boolean english = L10n.english(getContext());
         boolean seconds = prefs.getBoolean(ClockSettings.SHOW_SECONDS, true);
         boolean twelveHour = !"24".equals(prefs.getString(ClockSettings.TIME_FORMAT, "12"));
+        boolean showAmPm = twelveHour && prefs.getBoolean(ClockSettings.SHOW_AM_PM, true);
         String time = dateTime.format(DateTimeFormatter.ofPattern(
-                twelveHour ? (seconds ? "hh:mm:ss a" : "hh:mm a")
+                twelveHour ? (seconds ? (showAmPm ? "hh:mm:ss a" : "hh:mm:ss")
+                        : (showAmPm ? "hh:mm a" : "hh:mm"))
                         : (seconds ? "HH:mm:ss" : "HH:mm"), Locale.US));
         List<String> details = new ArrayList<>();
         if (prefs.getBoolean(ClockSettings.SHOW_ZONE, true)) {

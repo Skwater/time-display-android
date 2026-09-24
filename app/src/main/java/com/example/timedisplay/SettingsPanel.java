@@ -105,6 +105,7 @@ final class SettingsPanel {
     private TextView fontInfo;
     private TextView fontMenuLabel;
     private Button selectedZoneButton;
+    private Switch amPmToggle;
     private TextView colorHeaderLabel;
     private View colorPreview;
     private View defaultBackgroundColorPreview;
@@ -164,9 +165,11 @@ final class SettingsPanel {
                 LANGUAGE_VALUES, ClockSettings.LANGUAGE, "system");
         section(t("时间与日期", "Time and date"));
         spinner(t("时间格式", "Time format"),
-                new String[]{t("12 小时制（AM/PM）", "12-hour (AM/PM)"),
+                new String[]{t("12 小时制", "12-hour"),
                         t("24 小时制", "24-hour")},
                 TIME_FORMAT_VALUES, ClockSettings.TIME_FORMAT, "12");
+        amPmToggle = toggle(t("显示 AM/PM", "Show AM/PM"), ClockSettings.SHOW_AM_PM, true);
+        updateAmPmToggleVisibility();
         content.addView(label(t("时区", "Time zone"), 16));
         selectedZoneButton = createButton("", v -> showZonePicker());
         selectedZoneButton.setSingleLine(true);
@@ -773,6 +776,7 @@ final class SettingsPanel {
                 if (!value.equals(prefs.getString(key, fallback))) {
                     prefs.edit().putString(key, value).apply();
                     if (ClockSettings.BACKGROUND_SOURCE.equals(key)) updateSingleBackgroundControls();
+                    if (ClockSettings.TIME_FORMAT.equals(key)) updateAmPmToggleVisibility();
                     host.onSettingChanged(key);
                 }
             }
@@ -781,7 +785,13 @@ final class SettingsPanel {
         return spinner;
     }
 
-    private void toggle(String title, String key, boolean fallback) {
+    private void updateAmPmToggleVisibility() {
+        if (amPmToggle != null) amPmToggle.setVisibility(
+                "24".equals(prefs.getString(ClockSettings.TIME_FORMAT, "12"))
+                        ? View.GONE : View.VISIBLE);
+    }
+
+    private Switch toggle(String title, String key, boolean fallback) {
         Switch control = new Switch(host);
         control.setText(title);
         control.setTextColor(Color.WHITE);
@@ -799,6 +809,7 @@ final class SettingsPanel {
             host.onSettingChanged(key);
         });
         content.addView(control, new LinearLayout.LayoutParams(-1, dp(54)));
+        return control;
     }
 
     private void section(String title) {
