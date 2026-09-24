@@ -453,7 +453,7 @@ final class SettingsPanel {
         spinner(t("视频显示模式", "Video layout"),
                 new String[]{t("填充", "Fill"), t("适应", "Fit"), t("拉伸", "Stretch")},
                 VIDEO_MODE_VALUES, ClockSettings.PLAYLIST_VIDEO_MODE, "fill");
-        toggle(t("切换淡出淡入", "Fade between items"), ClockSettings.PLAYLIST_FADE, true);
+        toggle(t("切换时交叠淡化", "Crossfade between items"), ClockSettings.PLAYLIST_FADE, true);
         toggle(t("随机顺序", "Shuffle"), ClockSettings.PLAYLIST_SHUFFLE, false);
         toggle(t("循环播放", "Loop playlist"), ClockSettings.PLAYLIST_LOOP, true);
         TextView intervalLabel = label("", 16);

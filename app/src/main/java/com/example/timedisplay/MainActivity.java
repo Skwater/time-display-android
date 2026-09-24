@@ -4,8 +4,11 @@ import android.app.Activity;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.graphics.Color;
+import android.graphics.Bitmap;
+import android.graphics.Canvas;
 import android.graphics.ImageDecoder;
 import android.graphics.Matrix;
+import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.AnimatedImageDrawable;
 import android.graphics.drawable.Drawable;
@@ -18,6 +21,7 @@ import android.os.Looper;
 import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.PixelCopy;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.WindowInsets;
@@ -62,7 +66,9 @@ public final class MainActivity extends Activity {
     private ScrollView rightPanel;
     private View scrim;
     private View backgroundShade;
-    private View fadeCover;
+    private ImageView fadeCover;
+    private boolean transitionPending;
+    private boolean transitionRevealing;
     private LinearLayout previewControls;
     private ScaleGestureDetector scaleDetector;
     private boolean active;
@@ -112,10 +118,10 @@ public final class MainActivity extends Activity {
         backgroundShade.setBackgroundColor(Color.BLACK);
         backgroundShade.setAlpha(0f);
         root.addView(backgroundShade, new FrameLayout.LayoutParams(-1, -1));
-        fadeCover = new View(this);
-        fadeCover.setBackgroundColor(Color.BLACK);
+        fadeCover = new ImageView(this);
+        fadeCover.setScaleType(ImageView.ScaleType.FIT_XY);
         fadeCover.setAlpha(0f);
-        root.addView(fadeCover, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(fadeCover, 2, new FrameLayout.LayoutParams(-1, -1));
         face = new ClockFaceView(this);
         root.addView(face, new FrameLayout.LayoutParams(-1, -1));
 
@@ -217,7 +223,9 @@ public final class MainActivity extends Activity {
         active = false;
         mediaGeneration++;
         handler.removeCallbacks(playlistAdvance);
-        fadeCover.animate().cancel();
+        transitionPending = false;
+        transitionRevealing = false;
+        clearFadeCover();
         drawerGestureLocked = false;
         handler.removeCallbacks(tick);
         if (animation != null) animation.stop();
@@ -345,8 +353,6 @@ public final class MainActivity extends Activity {
         if (!playlistPlayback) return;
         playlistPaused = !playlistPaused;
         if (playlistPaused) {
-            fadeCover.animate().cancel();
-            fadeCover.setAlpha(0f);
             if (playlistCurrentIsImage) {
                 if (playlistImageReady) playlistImageRemainingMs = Math.max(1,
                         playlistImageDeadlineMs - SystemClock.uptimeMillis());
@@ -706,8 +712,9 @@ public final class MainActivity extends Activity {
 
     private void loadBackground(SharedPreferences prefs) {
         handler.removeCallbacks(playlistAdvance);
-        fadeCover.animate().cancel();
-        fadeCover.setAlpha(0f);
+        transitionPending = false;
+        transitionRevealing = false;
+        clearFadeCover();
         playlistPlayback = "playlist".equals(prefs.getString(ClockSettings.BACKGROUND_SOURCE, "single"));
         if (!playlistPlayback) playlistPaused = false;
         playlistItems = playlistPlayback ? new PlaylistStore(this).entries() : new ArrayList<>();
@@ -822,8 +829,8 @@ public final class MainActivity extends Activity {
                         });
                     }
                     current.start();
-                    if (playlistPlayback && playlistPaused) current.pause();
-                    handler.postDelayed(() -> revealMedia(generation), 1200);
+                    if (playlistPlayback) handler.postDelayed(
+                            () -> ensureVideoFirstFrame(current, generation, 0), 1500);
                 });
                 current.setOnErrorListener((player, what, extra) -> {
                     if (mediaGeneration != generation) return true;
@@ -864,7 +871,7 @@ public final class MainActivity extends Activity {
             if (playlistPlayback) skipFailedPlaylistItem();
             else {
                 backgroundShade.setAlpha(0f);
-                fadeCover.setAlpha(0f);
+                clearFadeCover();
                 Toast.makeText(this, L10n.text(this, "背景文件无法打开，请在右侧面板重新选择", "Background cannot be opened; choose it again"), Toast.LENGTH_LONG).show();
             }
         }
@@ -873,23 +880,142 @@ public final class MainActivity extends Activity {
     private void revealMedia(int generation) {
         if (mediaGeneration != generation || !active) return;
         playlistFailures = 0;
+        if (playlistPlayback && playlistPaused && video != null) video.pause();
         if (fadeCover.getAlpha() > 0f) {
+            if (transitionRevealing) return;
+            transitionRevealing = true;
             fadeCover.animate().cancel();
-            fadeCover.animate().alpha(0f).setDuration(250).start();
+            if (ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_FADE, true)) {
+                fadeCover.animate().alpha(0f).setDuration(500)
+                        .withEndAction(() -> {
+                            if (mediaGeneration == generation) {
+                                transitionPending = false;
+                                transitionRevealing = false;
+                                clearFadeCover();
+                            }
+                        }).start();
+            } else {
+                transitionPending = false;
+                transitionRevealing = false;
+                clearFadeCover();
+            }
+        } else {
+            transitionPending = false;
+            transitionRevealing = false;
         }
     }
 
+    private void ensureVideoFirstFrame(VideoView current, int generation, int attempt) {
+        if (video != current || mediaGeneration != generation || !active
+                || !transitionPending || transitionRevealing || fadeCover.getAlpha() <= 0f) return;
+        if (!current.getHolder().getSurface().isValid()) {
+            retryVideoFirstFrame(current, generation, attempt);
+            return;
+        }
+        Bitmap pixel = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888);
+        try {
+            PixelCopy.request(current, pixel, result -> {
+                pixel.recycle();
+                if (video != current || mediaGeneration != generation || !transitionPending) return;
+                if (result == PixelCopy.SUCCESS) revealMedia(generation);
+                else retryVideoFirstFrame(current, generation, attempt);
+            }, handler);
+        } catch (RuntimeException error) {
+            pixel.recycle();
+            retryVideoFirstFrame(current, generation, attempt);
+        }
+    }
+
+    private void retryVideoFirstFrame(VideoView current, int generation, int attempt) {
+        if (video != current || mediaGeneration != generation || !transitionPending
+                || transitionRevealing) return;
+        if (attempt >= 2) skipFailedPlaylistItem();
+        else handler.postDelayed(() -> ensureVideoFirstFrame(current, generation, attempt + 1), 1200);
+    }
+
+    private void clearFadeCover() {
+        fadeCover.animate().cancel();
+        fadeCover.setAlpha(0f);
+        fadeCover.setImageDrawable(null);
+    }
+
+    private void captureOutgoingFrame(int generation) {
+        int width = root.getWidth();
+        int height = root.getHeight();
+        if (width <= 0 || height <= 0) {
+            transitionPending = false;
+            showNextPlaylistItem();
+            return;
+        }
+        float scale = Math.min(1f, 1600f / Math.max(width, height));
+        Bitmap frame = Bitmap.createBitmap(Math.max(1, Math.round(width * scale)),
+                Math.max(1, Math.round(height * scale)), Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(frame);
+        canvas.scale(scale, scale);
+        canvas.drawColor(Color.BLACK);
+        defaultBackgroundLayer.draw(canvas);
+        if (video == null) {
+            image.draw(canvas);
+            beginMediaTransition(frame, generation);
+            return;
+        }
+        Rect visible = new Rect(video.getLeft(), video.getTop(), video.getRight(), video.getBottom());
+        if (!visible.intersect(0, 0, width, height) || !video.getHolder().getSurface().isValid()) {
+            frame.recycle();
+            transitionPending = false;
+            showNextPlaylistItem();
+            return;
+        }
+        Rect source = new Rect(visible);
+        source.offset(-video.getLeft(), -video.getTop());
+        Bitmap videoFrame = Bitmap.createBitmap(Math.max(1, Math.round(visible.width() * scale)),
+                Math.max(1, Math.round(visible.height() * scale)), Bitmap.Config.ARGB_8888);
+        try {
+            PixelCopy.request(video, source, videoFrame, result -> {
+                if (mediaGeneration != generation || !active || !transitionPending) {
+                    videoFrame.recycle();
+                    frame.recycle();
+                    return;
+                }
+                if (result == PixelCopy.SUCCESS) {
+                    canvas.drawBitmap(videoFrame, null, visible, null);
+                    videoFrame.recycle();
+                    beginMediaTransition(frame, generation);
+                } else {
+                    videoFrame.recycle();
+                    frame.recycle();
+                    transitionPending = false;
+                    showNextPlaylistItem();
+                }
+            }, handler);
+        } catch (RuntimeException error) {
+            videoFrame.recycle();
+            frame.recycle();
+            transitionPending = false;
+            showNextPlaylistItem();
+        }
+    }
+
+    private void beginMediaTransition(Bitmap frame, int generation) {
+        if (mediaGeneration != generation || !active || !transitionPending) {
+            frame.recycle();
+            return;
+        }
+        clearFadeCover();
+        fadeCover.setImageBitmap(frame);
+        fadeCover.setAlpha(1f);
+        showNextPlaylistItem();
+    }
+
     private void advancePlaylist() {
-        if (!playlistPlayback || !active || playlistPaused || playlistItems.size() < 2) return;
+        if (!playlistPlayback || !active || playlistPaused || transitionPending
+                || playlistItems.size() < 2) return;
         if (playlistPosition + 1 >= playlistOrder.size()
                 && !ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_LOOP, true)) return;
-        if (ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_FADE, true)) {
-            int generation = mediaGeneration;
-            fadeCover.animate().cancel();
-            fadeCover.animate().alpha(1f).setDuration(250).withEndAction(() -> {
-                if (mediaGeneration == generation && active) showNextPlaylistItem();
-            }).start();
-        } else showNextPlaylistItem();
+        transitionPending = true;
+        transitionRevealing = false;
+        handler.removeCallbacks(playlistAdvance);
+        captureOutgoingFrame(mediaGeneration);
     }
 
     private void schedulePlaylistImageAdvance() {
@@ -916,7 +1042,9 @@ public final class MainActivity extends Activity {
         playlistFailures++;
         if (playlistFailures >= playlistItems.size()) {
             clearCurrentMedia();
-            fadeCover.setAlpha(0f);
+            transitionPending = false;
+            transitionRevealing = false;
+            clearFadeCover();
             Toast.makeText(this, L10n.text(this, "播放列表中的媒体无法打开", "Playlist media could not be opened"),
                     Toast.LENGTH_LONG).show();
             return;
@@ -924,7 +1052,9 @@ public final class MainActivity extends Activity {
         if (playlistPosition + 1 >= playlistOrder.size()
                 && !ClockSettings.of(this).getBoolean(ClockSettings.PLAYLIST_LOOP, true)) {
             clearCurrentMedia();
-            fadeCover.setAlpha(0f);
+            transitionPending = false;
+            transitionRevealing = false;
+            clearFadeCover();
             Toast.makeText(this, L10n.text(this, "播放列表末项无法打开", "The last playlist item could not be opened"),
                     Toast.LENGTH_SHORT).show();
             return;
