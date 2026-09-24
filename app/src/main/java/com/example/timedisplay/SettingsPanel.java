@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException;
 import android.content.ClipData;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.database.Cursor;
 import android.graphics.Color;
@@ -53,6 +54,8 @@ import java.util.Locale;
 import java.util.TimeZone;
 
 final class SettingsPanel {
+    private static final String SOURCE_URL = "https://github.com/Skwater/time-display-android";
+    private static final String LICENSE_URL = SOURCE_URL + "/blob/main/LICENSE";
     private static final int PICK_IMAGE = 1;
     private static final int PICK_FONT = 2;
     private static final int PICK_VIDEO = 3;
@@ -210,6 +213,12 @@ final class SettingsPanel {
         });
         content.addView(transparency, new LinearLayout.LayoutParams(-1, dp(48)));
         hint(t("仅调整左右侧栏背景；文字和时钟画面不变。", "Only the panels change; the clock and image stay the same."));
+        section(t("关于", "About"));
+        hint(t("版本：", "Version: ") + appVersion());
+        infoLink(t("开源地址", "Source code"), SOURCE_URL);
+        hint(t("开源协议：GNU 通用公共许可证第 3 版（GPLv3）",
+                "License: GNU General Public License version 3 (GPLv3)"));
+        infoLink(t("查看完整协议", "Read the full license"), LICENSE_URL);
         return panel;
     }
 
@@ -823,6 +832,31 @@ final class SettingsPanel {
         view.setTextColor(0xFFB0BECF);
         view.setPadding(0, dp(6), 0, dp(6));
         content.addView(view);
+    }
+
+    private void infoLink(String title, String url) {
+        TextView view = label(title + "  ↗\n" + url, 14);
+        view.setTextColor(0xFFBBD6FF);
+        view.setPadding(0, dp(8), 0, dp(8));
+        view.setContentDescription(title + " " + url);
+        view.setOnClickListener(v -> {
+            try {
+                host.startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (ActivityNotFoundException | SecurityException error) {
+                toast(t("无法打开链接", "Cannot open link"));
+            }
+        });
+        content.addView(view);
+    }
+
+    private String appVersion() {
+        try {
+            String version = host.getPackageManager()
+                    .getPackageInfo(host.getPackageName(), 0).versionName;
+            return version == null ? "?" : version;
+        } catch (PackageManager.NameNotFoundException error) {
+            return "?";
+        }
     }
 
     private TextView label(String text, int size) {
