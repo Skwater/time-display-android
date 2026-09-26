@@ -8,7 +8,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg" alt="License: GPL v3" /></a>
 </p>
 
-一个可横屏或竖屏使用的全屏时钟。显示 24 小时制的时、分、秒，可切换时区、单独开关时区文字，并可选择显示公历日期、中国农历。支持本地图片、GIF / 动态 WebP、视频背景、背景亮度与位置调节、侧栏透明度、动态按钮颜色、文字阴影和加粗、多字体导入管理，以及字体颜色调节。
+一个可横屏或竖屏使用的全屏时钟。支持 12/24 小时制、秒数开关、时区切换，以及公历日期和中国农历显示。可使用本地图片、GIF / 动态 WebP、视频或播放列表作为背景，并调节背景、文字和侧栏的外观。
 
 本项目的创意来源于作者曾经用过的一款时钟 App，在此致谢。项目从零重写，独立实现全部功能。
 
@@ -28,9 +28,9 @@
 
 用 Android Studio 打开本文件夹，在 Android 9（API 28）及以上设备或模拟器运行 `app`。项目使用 Android Gradle Plugin 8.13.2 与 Gradle 8.13，无需网络权限。
 
-## 构建与校验
+## 构建
 
-在项目根目录运行 `./tools/build-verify.ps1`；需要校验预期版本时可加 `-ExpectedVersion 0.10.2`。脚本离线构建 Debug APK，检查包名、版本、应用名、固定签名和 APK 对齐，再将文件复制到 `releases/`。终端只输出摘要；完整日志写在 `.tmp/`。脚本要求本机保留 `keystore.properties` 和固定 Debug 密钥，缺失时会中止，防止生成无法覆盖安装的 APK。
+安装 Android SDK 与 JDK 17 后，在项目根目录运行 `./gradlew assembleDebug`（Windows PowerShell 使用 `.\gradlew.bat assembleDebug`）。也可以用 Android Studio 打开项目并运行 `app`。
 
 ## 目录
 
@@ -46,8 +46,4 @@ app/src/main/java/com/example/timedisplay/
   L10n.java               应用语言选择与中英文文案
   PlaylistStore.java      背景播放列表文件和顺序管理
   PlaylistFolderImporter.java 文件夹扫描与媒体导入
-tools/build-verify.ps1    离线构建、固定签名和 APK 元数据校验
-docs/                     产品与开发文档（仅本地保留，不上传）
-.tmp/                     临时文件（不上传）
-.trash/                   垃圾回收区（不上传）
 ```
