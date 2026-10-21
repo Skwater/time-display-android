@@ -1,5 +1,7 @@
 param(
-    [string]$ExpectedVersion
+    [string]$ExpectedVersion,
+    [ValidateSet('debug', 'release')]
+    [string]$Variant = 'debug'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,9 +22,14 @@ if ($ExpectedVersion -and $ExpectedVersion -ne $version) {
 }
 
 $properties = Join-Path $project 'keystore.properties'
-$keystore = Join-Path $project 'app\signing\time-display-debug.keystore'
+$keystoreName = if ($Variant -eq 'release') {
+    'screen-clock-v1-release.keystore'
+} else {
+    'time-display-debug.keystore'
+}
+$keystore = Join-Path $project "app\signing\$keystoreName"
 if (-not (Test-Path -LiteralPath $properties) -or -not (Test-Path -LiteralPath $keystore)) {
-    throw 'Fixed debug signing files are missing. Refusing a build with a different key.'
+    throw "Fixed $Variant signing files are missing. Refusing a build with a different key."
 }
 
 $sdk = if ($env:ANDROID_HOME -and (Test-Path -LiteralPath $env:ANDROID_HOME)) {
@@ -66,29 +73,35 @@ $releases = Join-Path $project 'releases'
 foreach ($directory in @($temp, $releases, $env:ANDROID_USER_HOME, $gradleHome)) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
 }
-$log = Join-Path $temp "build-verify-$version.log"
+$log = Join-Path $temp "build-verify-$version-$Variant.log"
 Push-Location $project
 try {
     # Native Gradle writes routine startup messages to stderr; inspect its exit code instead.
     $ErrorActionPreference = 'Continue'
-    & $gradle :app:assembleDebug --offline --no-daemon *> $log
+    $task = if ($Variant -eq 'release') { ':app:assembleRelease' } else { ':app:assembleDebug' }
+    & $gradle $task --offline --no-daemon *> $log
     $ErrorActionPreference = 'Stop'
     if ($LASTEXITCODE -ne 0) {
         Get-Content -LiteralPath $log -Tail 40 | Write-Output
         throw "Gradle build failed; full log: $log"
     }
 
-    $apk = Join-Path $project 'app\build\outputs\apk\debug\app-debug.apk'
+    $apk = Join-Path $project "app\build\outputs\apk\$Variant\app-$Variant.apk"
     if (-not (Test-Path -LiteralPath $apk)) { throw "Build output missing: $apk" }
     $badging = & $aapt dump badging $apk 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'aapt could not read the built APK.' }
     $packageLine = $badging | Select-String -Pattern '^package:' | Select-Object -First 1
     if (-not $packageLine) { throw 'APK package metadata is missing.' }
     $package = $packageLine.Line
-    if ($package -notmatch "name='com\.example\.timedisplay'" -or
+    if ($package -notmatch "name='io\.github\.skwater\.screenclock'" -or
             $package -notmatch "versionCode='$versionCode'" -or
             $package -notmatch "versionName='$([regex]::Escape($version))'") {
         throw "APK metadata does not match the project version: $package"
+    }
+    $minimumSdk = if ($badging | Select-String -SimpleMatch "sdkVersion:'28'") { $true } else { $false }
+    $targetSdk = if ($badging | Select-String -SimpleMatch "targetSdkVersion:'36'") { $true } else { $false }
+    if (-not $minimumSdk -or -not $targetSdk) {
+        throw 'APK Android SDK range does not match API 28 through target API 36.'
     }
     $manifest = Get-Content -LiteralPath (Join-Path $project 'app\src\main\AndroidManifest.xml') -Raw -Encoding utf8
     if ($manifest -notmatch 'android:label="@string/app_name"') {
@@ -111,7 +124,11 @@ try {
         Select-Object -First 1
     if (-not $certificateLine) { throw 'Signer certificate fingerprint is missing.' }
     $certificate = $certificateLine.Matches.Groups[1].Value.ToUpperInvariant()
-    $expectedCertificate = '9E2A7F5106CA4D71913FFFF1ECC24A2120889EB06A3EBAD2155E87E60BAD0703'
+    $expectedCertificate = if ($Variant -eq 'release') {
+        '674D89112594EB5EF76375CF394A567A84A25B466393D2B8F4590A095AF911EF'
+    } else {
+        '9E2A7F5106CA4D71913FFFF1ECC24A2120889EB06A3EBAD2155E87E60BAD0703'
+    }
     if ($certificate -ne $expectedCertificate) {
         throw "Unexpected signing certificate: $certificate"
     }
@@ -119,7 +136,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'zipalign verification failed.' }
     @($badging, $signing, $alignment) | Out-File -LiteralPath $log -Append -Encoding utf8
 
-    $release = Join-Path $releases "time-display-$version-debug.apk"
+    $release = Join-Path $releases "screen-clock-$version-$Variant.apk"
     Copy-Item -LiteralPath $apk -Destination $release -Force
     $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $release).Hash
     Write-Output "OK: version $version (code $versionCode); APK signature and alignment verified"

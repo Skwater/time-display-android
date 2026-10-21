@@ -10,18 +10,18 @@ if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
 def fixedDebugKeystore = file('signing/time-display-debug.keystore')
-def fixedReleaseKeystore = file('signing/time-display-release.keystore')
+def officialReleaseKeystore = file('signing/screen-clock-v1-release.keystore')
 
 android {
     namespace 'com.example.timedisplay'
     compileSdk 36
 
     defaultConfig {
-        applicationId 'com.example.timedisplay'
+        applicationId 'io.github.skwater.screenclock'
         minSdk 28
-        targetSdk 35
-        versionCode 32
-        versionName '0.10.3'
+        targetSdk 36
+        versionCode 33
+        versionName '1.0.0'
     }
 
     signingConfigs {
@@ -33,13 +33,13 @@ android {
                 keyPassword keystoreProps.getProperty('keyPassword')
             }
         }
-        // 正式版签名：凭据取自 keystore.properties 的 release* 字段，密钥存在时才启用。
-        if (keystorePropsFile.exists() && fixedReleaseKeystore.exists()) {
+        // 正式版签名使用独立密钥；凭据仅保存在本地、被 Git 忽略的 keystore.properties。
+        if (keystorePropsFile.exists() && officialReleaseKeystore.exists()) {
             release {
-                storeFile file(keystoreProps.getProperty('releaseStoreFile'))
-                storePassword keystoreProps.getProperty('releaseStorePassword')
-                keyAlias keystoreProps.getProperty('releaseKeyAlias')
-                keyPassword keystoreProps.getProperty('releaseKeyPassword')
+                storeFile officialReleaseKeystore
+                storePassword keystoreProps.getProperty('officialStorePassword')
+                keyAlias keystoreProps.getProperty('officialKeyAlias')
+                keyPassword keystoreProps.getProperty('officialKeyPassword')
             }
         }
     }
@@ -51,7 +51,7 @@ android {
             }
         }
         release {
-            if (keystorePropsFile.exists() && fixedReleaseKeystore.exists()) {
+            if (keystorePropsFile.exists() && officialReleaseKeystore.exists()) {
                 signingConfig signingConfigs.release
             }
             minifyEnabled false

@@ -26,11 +26,13 @@
 
 ## 运行
 
-用 Android Studio 打开本文件夹，在 Android 9（API 28）及以上设备或模拟器运行 `app`。项目使用 Android Gradle Plugin 8.13.2 与 Gradle 8.13，无需网络权限。
+用 Android Studio 打开本文件夹，在 Android 9（API 28）及以上设备或模拟器运行 `app`。项目使用 Android Gradle Plugin 8.13.2 与 Gradle 8.13，目标 API 36，无需网络权限。
 
 ## 构建
 
-安装 Android SDK 与 JDK 17 后，在项目根目录运行 `./gradlew assembleDebug`（Windows PowerShell 使用 `.\gradlew.bat assembleDebug`）。也可以用 Android Studio 打开项目并运行 `app`。
+安装 Android SDK 与 JDK 17 后，在项目根目录运行 `./gradlew assembleDebug`（Windows PowerShell 使用 `.\gradlew.bat assembleDebug`）。也可以用 Android Studio 打开项目并运行 `app`。正式版使用作者本地保存的独立签名密钥构建；仓库不包含私钥或密码。
+
+正式版 1.0.0 的应用 ID 为 `io.github.skwater.screenclock`。此前测试版使用不同应用 ID，因此正式版会作为新应用安装，测试版的设置不会自动迁移。下载时请从对应的 [GitHub Releases](https://github.com/Skwater/time-display-android/releases) 页面获取正式版 APK。
 
 ## 目录
 
