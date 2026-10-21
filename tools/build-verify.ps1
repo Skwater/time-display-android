@@ -61,7 +61,7 @@ $env:GRADLE_OPTS = "-Duser.home=$gradleHome"
 Remove-Item Env:ANDROID_SDK_HOME -ErrorAction SilentlyContinue
 Remove-Item Env:JAVA_TOOL_OPTIONS -ErrorAction SilentlyContinue
 
-$temp = Join-Path $project '.tmp'
+$temp = Join-Path (Split-Path -Parent $project) '.tmp'
 $releases = Join-Path $project 'releases'
 foreach ($directory in @($temp, $releases, $env:ANDROID_USER_HOME, $gradleHome)) {
     New-Item -ItemType Directory -Path $directory -Force | Out-Null
@@ -69,7 +69,10 @@ foreach ($directory in @($temp, $releases, $env:ANDROID_USER_HOME, $gradleHome))
 $log = Join-Path $temp "build-verify-$version.log"
 Push-Location $project
 try {
+    # Native Gradle writes routine startup messages to stderr; inspect its exit code instead.
+    $ErrorActionPreference = 'Continue'
     & $gradle :app:assembleDebug --offline --no-daemon *> $log
+    $ErrorActionPreference = 'Stop'
     if ($LASTEXITCODE -ne 0) {
         Get-Content -LiteralPath $log -Tail 40 | Write-Output
         throw "Gradle build failed; full log: $log"
@@ -88,14 +91,18 @@ try {
         throw "APK metadata does not match the project version: $package"
     }
     $manifest = Get-Content -LiteralPath (Join-Path $project 'app\src\main\AndroidManifest.xml') -Raw -Encoding utf8
-    $labelMatch = [regex]::Match($manifest, 'android:label="([^"]+)"')
-    if (-not $labelMatch.Success -or $labelMatch.Groups[1].Value.StartsWith('@')) {
-        throw 'Cannot read the expected application label from AndroidManifest.xml.'
+    if ($manifest -notmatch 'android:label="@string/app_name"') {
+        throw 'AndroidManifest.xml must reference the localized app_name resource.'
     }
-    $expectedLabel = $labelMatch.Groups[1].Value
-    $labelLine = $badging | Select-String -Pattern '^application-label:' | Select-Object -First 1
-    if (-not $labelLine -or $labelLine.Line -ne "application-label:'$expectedLabel'") {
-        throw 'APK application label does not match AndroidManifest.xml.'
+    $englishResources = [xml](Get-Content -LiteralPath (Join-Path $project 'app\src\main\res\values\strings.xml') -Raw -Encoding utf8)
+    $chineseResources = [xml](Get-Content -LiteralPath (Join-Path $project 'app\src\main\res\values-zh\strings.xml') -Raw -Encoding utf8)
+    $englishLabel = $englishResources.SelectSingleNode('/resources/string[@name="app_name"]').InnerText
+    $chineseLabel = $chineseResources.SelectSingleNode('/resources/string[@name="app_name"]').InnerText
+    $defaultLabelLine = $badging | Select-String -Pattern '^application-label:' | Select-Object -First 1
+    $chineseLabelLine = $badging | Select-String -Pattern '^application-label-zh(?:-[^:]*)?:' | Select-Object -First 1
+    if (-not $defaultLabelLine -or $defaultLabelLine.Line -ne "application-label:'$englishLabel'" -or
+            -not $chineseLabelLine -or $chineseLabelLine.Line -ne "application-label-zh:'$chineseLabel'") {
+        throw 'APK application labels do not match English and Chinese resources.'
     }
 
     $signing = & $apksigner verify --print-certs $apk 2>&1
